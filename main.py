@@ -1192,6 +1192,8 @@ async def create_work_from_assembly(request: web.Request):
 
         logging.info("\ncreate_work_from_assembly")
         logging.info("assembly_id %d", assembly_id)
+        logging.info("assembly_name %s", assembly_name)
+        logging.info("assembly_parent_id %d", assembly_parent_id)
         logging.info("order_id %d", order_id)
         logging.info("details (all subtasks) %s", details)
         logging.info("subtask_counts %s", subtask_counts)
@@ -1455,7 +1457,7 @@ async def complete_order(request: web.Request):
             if process_id == 77659:  # Складское хозяйство
                 pass
             else:
-                if status_id != 3 and status_id != 226 and status_id != 189:  # Завершенная/Частично готово/Готово
+                if status_id != 3 and status_id != 189:  # Завершенная/Готово
                     all_subtasks_complete = False
                     break
         logging.info("_process_ids %s", process_ids)
@@ -1483,73 +1485,19 @@ async def complete_order(request: web.Request):
         return web.HTTPOk()  # Planfix will sleep for 3 minutes if it receives error code, so always return 200
 
 
-@routes.post("/complete_all_assemblies")
-async def complete_all_assemblies(request: web.Request):
-    try:
-        body = await request.json()
-
-        main_task_id = int(body["main_task_id"])
-        subtask_ids = body["subtask_ids"]
-        subtask_status_ids = body["subtask_status_ids"]
-
-        logging.info("\ncomplete_all_assemblies")
-        logging.info("main_task_id %d", main_task_id)
-        logging.info("subtask_ids %s", subtask_ids)
-        logging.info("subtask_status_ids %s", subtask_status_ids)
-
-        tasks = {}
-
-        all_subtasks_complete = True
-        for i in range(len(subtask_status_ids)):
-            status_id = int(subtask_status_ids[i])
-
-            task_id = int(subtask_ids[i])
-            task = planfix_get(f"/task/{task_id}?fields=template,parent,processId&sourceId=0").json()["task"]
-            tasks[task_id] = task
-
-            if int(task["processId"]) == 77659: # Склад готовой продукции
-                continue
-            if status_id == 0 and int(task["parent"]["id"]) == main_task_id: # Не поступившие в работу задачи "Обработка" сборки
-                continue
-
-            if status_id != 3 and status_id != 189 and status_id != 226:  # Завершенная, Готово, Частично готово
-                all_subtasks_complete = False
-
-        if all_subtasks_complete:
-            logging.info("All subtasks tasks complete. Completing all assembly tasks")
-
-            body = {
-                "status": {"id": 3}  # Завершенная
-            }
-
-            for i in range(len(subtask_ids)):
-                status_id = int(subtask_status_ids[i])
-                task_id = int(subtask_ids[i])
-                task = tasks[task_id]
-
-                if int(task["processId"]) == 77659: # Склад готовой продукции
-                    continue
-
-                if status_id == 226:  # Частично готово
-                    planfix_post(f"task/{task_id}?silent=false", body)
-
-        return web.HTTPOk()
-    except Exception as e:
-        print_error(e)
-        return web.HTTPOk()  # Planfix will sleep for 3 minutes if it receives error code, so always return 200
-
-
 @routes.post("/complete_assembly_from_work")
 async def complete_assembly_from_work(request: web.Request):
     try:
         body = await request.json()
 
         task_id = int(body["task_id"])
+        parent_task_first_level_assembly = True if int(body["parent_task_first_level_assembly"]) == 1 else False
         subtask_statuses = body["subtask_statuses"]
         order_assembly_work_count = int(str(body["order_assembly_work_count"]) if len(str(body["order_assembly_work_count"])) != 0 else 0)
 
         logging.info("\ncomplete_assembly_from_work")
         logging.info("task_id %d", task_id)
+        logging.info("parent_task_first_level_assembly %s", "true" if parent_task_first_level_assembly else "false")
         logging.info("subtask_statuses %s", subtask_statuses)
         logging.info("order_assembly_work_count %d", order_assembly_work_count)
 
@@ -1563,9 +1511,9 @@ async def complete_assembly_from_work(request: web.Request):
         if all_subtasks_complete:
             logging.info("All subtasks tasks complete. Completing parent task")
 
-            if order_assembly_work_count == 0:
+            if parent_task_first_level_assembly and order_assembly_work_count == 0:
                 body = {
-                    "status": {"id": 226}  # Частично готово
+                    "status": {"id": 189}  # Готово
                 }
             else:
                 body = {
@@ -1636,7 +1584,7 @@ async def complete_assembly_from_details(request: web.Request):
             logging.info("All subtasks tasks complete. Completing parent task")
 
             body = {
-                "status": {"id": 226}  # Частично готово
+                "status": {"id": 189}  # Готово
             }
             planfix_post(f"task/{task_id}?silent=false", body)
 
