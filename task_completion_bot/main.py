@@ -18,11 +18,11 @@ def get_order_by_machine(machine_task_id: int):
     return { "id": order_task["id"], "name": order_task["name"], "order_number": order_task["customFieldData"][0]["value"] }
 
 def get_machine_list():
-    response = planfix_post(f"directory/14/entry/list", { "offset": 0, "pageSize": 100, "fields": "28", "groupsOnly": False }).json()["directoryEntries"]
+    response = planfix_post(f"directory/14/entry/list", { "offset": 0, "pageSize": 100, "fields": "28,61", "groupsOnly": False }).json()["directoryEntries"]
     result = []
     for directory in response:
        if directory.__contains__("customFieldData"):
-           result.append(directory["customFieldData"][0]["value"])
+           result.append({"name": directory["customFieldData"][0]["value"], "hasCutting": directory["customFieldData"][1]["value"]})
 
     return result
 
@@ -43,10 +43,13 @@ def create_machines_list_button(chat_id):
     markup = InlineKeyboardMarkup()
 
     machine_list = get_machine_list()
-    message_text = "Выберите станок:"
+    message_text = "Выберите обработку:"
 
     for i, machine in enumerate(machine_list):
-        markup.add(InlineKeyboardButton(machine, callback_data=f"getMachineTasks/{i}"))
+        if not bool(machine["hasCutting"]):
+            continue
+
+        markup.add(InlineKeyboardButton(machine["name"], callback_data=f"getMachineTasks/{i}"))
 
     bot.send_message(chat_id, message_text, reply_markup=markup)
 
@@ -69,26 +72,25 @@ def callback_inline(call):
 
         orders_in_work = { }
         for i, task in enumerate(task_list):
-            if task["customFieldData"][0]["value"]["value"] == machine_list[machine_index]:
+            if task["customFieldData"][0]["value"]["value"] == machine_list[machine_index]["name"]:
                 order = get_order_by_machine(task["id"])
                 orders_in_work[order["id"]] = order
 
         for order in orders_in_work.values():
             markup.add(InlineKeyboardButton(f"{order['name']} ({order['order_number']})", callback_data=f"getOrderDetails/{order['id']}/{order['name']}/{machine_index}"))
 
-        bot.send_message(call.from_user.id, f"Заказы на \"{machine_list[machine_index]}\":", reply_markup=markup)
+        bot.send_message(call.from_user.id, f"Заказы по обработке <b>{machine_list[machine_index]['name']}</b>:", reply_markup=markup, parse_mode="HTML")
     elif call_data[0] == "getOrderDetails":
         machine_index = int(call_data[3])
         machine_list = get_machine_list()
         markup = InlineKeyboardMarkup()
 
+        work_name = machine_list[machine_index]["name"]
         order_id = int(call_data[1])
         order_task = get_task_by_id(order_id)
         tasks_in_work = get_tasks_in_work_or_ready_for_work()
         for i, task in enumerate(tasks_in_work):
             if get_order_by_machine(task["id"])["id"] == order_id:
-                work_name = machine_list[machine_index]
-
                 if task["customFieldData"][0]["value"]["value"] == work_name:
                     detail_task = None
                     if task["template"]["id"] == 14510: # Обработка
@@ -103,7 +105,7 @@ def callback_inline(call):
                     task_name = task_name.replace(work_name, "")
                     markup.add(InlineKeyboardButton(f'{"Р* " if is_task_in_work else ""}{task_name} | {cutting_pieces}', callback_data=f"getTaskStatusOptions/{task['id']}/{detail_task['id']}/{order_task['id']}"))
 
-        bot.send_message(call.from_user.id, f"Раскрои по заказу \"{call_data[2]}\" ({order_task['customFieldData'][0]['value']}) {work_name}:", reply_markup=markup)
+        bot.send_message(call.from_user.id, f"Раскрои по заказу <b>{call_data[2]}</b>({order_task['customFieldData'][0]['value']}) по обработке <b>{work_name}</b>:", reply_markup=markup, parse_mode="HTML")
 
     elif call_data[0] == "getTaskStatusOptions":
         task = get_task_by_id(int(call_data[1]))
@@ -120,7 +122,7 @@ def callback_inline(call):
         if is_detail_in_work:
             markup.add(InlineKeyboardButton(f'Завершить работу', callback_data=f'changeTaskStatus/{task['id']}/{detail_task['id']}/{order_task['id']}/{3}')) # 2 - Завершённая
 
-        bot.send_message(call.from_user.id, f"Заказ: {order_task['name']} ({order_task['customFieldData'][0]['value']})\nРаскрой: \"{detail_task['name']}\"", reply_markup=markup)
+        bot.send_message(call.from_user.id, f"Заказ: <b>{order_task['name']}</b>({order_task['customFieldData'][0]['value']})\nРаскрой: <b>{detail_task['name']}</b>", reply_markup=markup, parse_mode="HTML")
 
     elif call_data[0] == "changeTaskStatus":
         task_id = int(call_data[1])
@@ -128,7 +130,7 @@ def callback_inline(call):
         order_task = get_task_by_id(int(call_data[3]))
         status_id = int(call_data[4])
         status_name = "В работе" if status_id == 2 else "Завершённая" if status_id == 3 else f"<unknown status id {status_id}>"
-        bot.send_message(call.from_user.id, f"Заказ: {order_task['name']} ({order_task['customFieldData'][0]['value']})\nРаскрой: \"{detail_task['name']}\"\nТеперь \"{status_name}\"")
+        bot.send_message(call.from_user.id, f"Заказ: <b>{order_task['name']}</b>({order_task['customFieldData'][0]['value']})\nРаскрой: <b>{detail_task['name']}</b>\nТеперь <b>{status_name}</b>", parse_mode="HTML")
 
         planfix_post(f"task/{task_id}?silent=false", {
             "status": {
