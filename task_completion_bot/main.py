@@ -8,10 +8,10 @@ BOT_TOKEN = "7555357284:AAEpLJ7ayCI06YS1SbXb9ratAfZUV2QsmP8"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 def get_tasks_in_work_or_ready_for_work():
-    return planfix_post(f"/task/list", {"offset": 0, "pageSize": 100, "filterId": "1289394", "fields": "id,name,parent,template,status,105881", "sourceId": 0}).json()["tasks"]  # Filter 1289394 is "Заказы (В работе/Принять работу) (Для Task completion bot)" in ztta.planfix.com, fields 105881 Текущая Обработка
+    return planfix_post(f"/task/list", {"offset": 0, "pageSize": 100, "filterId": "1289394", "fields": "id,name,parent,template,status,105881,105973", "sourceId": 0}).json()["tasks"]  # Filter 1289394 is "Заказы (В работе/Принять работу) (Для Task completion bot)" in ztta.planfix.com, fields 105881 Текущая Обработка
 
 def get_task_by_id(task_id: int):
-    return planfix_get(f"task/{task_id}?fields=id,status,template,name,parent,105596,105873&sourceId=0").json()["task"]
+    return planfix_get(f"task/{task_id}?fields=id,status,template,name,parent,105596,105873,21156&sourceId=0").json()["task"]
 
 def get_order_by_machine(machine_task_id: int):
     order_task = get_task_by_id(get_task_by_id(machine_task_id)["customFieldData"][0]["value"]["id"])
@@ -72,7 +72,7 @@ def callback_inline(call):
 
         orders_in_work = { }
         for i, task in enumerate(task_list):
-            if task["customFieldData"][0]["value"]["value"] == machine_list[machine_index]["name"]:
+            if task["customFieldData"][1]["value"]["value"] == machine_list[machine_index]["name"]:
                 order = get_order_by_machine(task["id"])
                 orders_in_work[order["id"]] = order
 
@@ -91,7 +91,7 @@ def callback_inline(call):
         tasks_in_work = get_tasks_in_work_or_ready_for_work()
         for i, task in enumerate(tasks_in_work):
             if get_order_by_machine(task["id"])["id"] == order_id:
-                if task["customFieldData"][0]["value"]["value"] == work_name:
+                if task["customFieldData"][1]["value"]["value"] == work_name:
                     detail_task = None
                     if task["template"]["id"] == 14510: # Обработка
                         detail_task = get_task_by_id(task["parent"]["id"])
@@ -103,7 +103,8 @@ def callback_inline(call):
 
                     task_name = detail_task["name"]
                     task_name = task_name.replace(work_name, "")
-                    markup.add(InlineKeyboardButton(f'{"Р* " if is_task_in_work else ""}{task_name} | {cutting_pieces}', callback_data=f"getTaskStatusOptions/{task['id']}/{detail_task['id']}/{order_task['id']}"))
+                    work_is_irrelevant = detail_task['customFieldData'][0]['value'] != ""
+                    markup.add(InlineKeyboardButton(f'{"Н* " if work_is_irrelevant else ""}{"Р* " if is_task_in_work else ""}{task_name} | {cutting_pieces}', callback_data=f"getTaskStatusOptions/{task['id']}/{detail_task['id']}/{order_task['id']}" if not work_is_irrelevant else "_"))
 
         bot.send_message(call.from_user.id, f"Раскрои по заказу <b>{call_data[2]}</b>({order_task['customFieldData'][0]['value']}) по обработке <b>{work_name}</b>:", reply_markup=markup, parse_mode="HTML")
 
