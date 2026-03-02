@@ -17,6 +17,9 @@ from structs import *
 
 import logging
 
+TEMPLATE_DETAIL = 8732005
+TEMPLATE_WORK = 8732007
+
 HOST = os.getenv('HOST', '0.0.0.0')
 PORT = int(os.getenv('PORT', 10210))
 
@@ -161,6 +164,7 @@ class Task:
         self.work_belongs_to_assembly = None
         self.work_belongs_to_order = None
 
+        self.parent = None
         self.children = []
 
         self.dvg_file_ids = []
@@ -168,7 +172,13 @@ class Task:
     def get_id(self):
         return self.task_id
 
+    def is_detail_task(self):
+        return self.template_id == TEMPLATE_DETAIL
+    def is_work_task(self):
+        return self.template_id == TEMPLATE_WORK
+
     def add_child(self, child):
+        child.parent = self
         self.children.append(child)
         return self.children[-1]
 
@@ -196,8 +206,6 @@ class Task:
 
 # TODO: This is not the best solution, we should just use parent task id's with children task id's instead of all of this template, children count nonsense
 def recreate_task_tree_from_list(order_id, task_ids, template_ids, subtask_counts, cutting_needed, work_belongs_to_assembly, work_belongs_to_order):
-    TEMPLATE_WORK = 8732007
-    TEMPLATE_DETAIL = 8732005
     tasks = [Task(int(tid), int(tmpl_id)) for tid, tmpl_id in zip(task_ids, template_ids)]
     root = Task(order_id, 0)
 
@@ -1189,6 +1197,8 @@ async def create_work_from_assembly(request: web.Request):
         order_number = int(planfix_get(f"task/{order_id}?fields=105596&sourceId=0").json()["task"]["customFieldData"][0]["value"])
         details = body["details"]
         subtask_counts = body["subtask_counts"]
+        work_belongs_to_assembly = body["work_belongs_to_assembly"]
+        work_belongs_to_order = body["work_belongs_to_order"]
 
         logging.info("\ncreate_work_from_assembly")
         logging.info("assembly_id %d", assembly_id)
@@ -1197,6 +1207,8 @@ async def create_work_from_assembly(request: web.Request):
         logging.info("order_id %d", order_id)
         logging.info("details (all subtasks) %s", details)
         logging.info("subtask_counts %s", subtask_counts)
+        logging.info("work_belongs_to_assembly %s", work_belongs_to_assembly)
+        logging.info("work_belongs_to_order %s", work_belongs_to_order)
 
         if order_id != assembly_parent_id:
             logging.info("assembly task is not a direct child of the order task, skipping it")
@@ -1206,12 +1218,6 @@ async def create_work_from_assembly(request: web.Request):
         input_detail_templates = details[1]
         input_detail_cutting_needed = details[2]
 
-        work_belongs_to_assembly = []
-        for i in range(len(input_detail_ids)):
-            work_belongs_to_assembly.append('Нет')
-        work_belongs_to_order = []
-        for i in range(len(input_detail_ids)):
-            work_belongs_to_order.append('Нет')
         assembly_task_tree = recreate_task_tree_from_list(assembly_id, input_detail_ids, input_detail_templates, subtask_counts, input_detail_cutting_needed, work_belongs_to_assembly, work_belongs_to_order)
         assembly_task_tree.print_children()
 
@@ -1233,60 +1239,64 @@ async def create_work_from_assembly(request: web.Request):
 
         reported_errors = []
         unique_work = {}
-        for detail_task in assembly_task_tree.children:
-            for work_task in detail_task.children:
-                def get_work_error():
-                    return f"Сборка: \"{assembly_name}\" деталь: \"{planfix_get(f"task/{detail_task.get_id()}?fields=name&sourceId=0").json()["task"]["name"]}\" [{unique_work_names[work_type]}] Ошибка: "
+        for work_task in assembly_task_tree.get_all_children():
+            if not work_task.is_work_task():
+                continue
 
-                if work_task.cutting_needed:
-                    task_data = planfix_get(f"task/{work_task.get_id()}?fields=105881,105574&sourceId=0").json()["task"]
+            detail_task = work_task.parent
 
-                    work_type = int(task_data["customFieldData"][1]["value"]["id"])
+            def get_work_error():
+                return f"Сборка: \"{assembly_name}\" деталь: \"{planfix_get(f"task/{detail_task.get_id()}?fields=name&sourceId=0").json()["task"]["name"]}\" [{unique_work_names[work_type]}] Ошибка: "
 
-                    # Retrieve detail information (Name, Files)
-                    file_ids = task_data["customFieldData"][0]["value"]
-                    # if len(file_ids) > 1:
-                    #     reported_errors.append(get_work_error() + "Количество файлов DVG/DXF больше чем 1")
-                    #     continue
-                    if len(file_ids) == 0:
-                        reported_errors.append(get_work_error() + "Нет файлов DVG/DXF")
+            if work_task.cutting_needed:
+                task_data = planfix_get(f"task/{work_task.get_id()}?fields=105881,105574&sourceId=0").json()["task"]
+
+                work_type = int(task_data["customFieldData"][1]["value"]["id"])
+
+                # Retrieve detail information (Name, Files)
+                file_ids = task_data["customFieldData"][0]["value"]
+                # if len(file_ids) > 1:
+                #     reported_errors.append(get_work_error() + "Количество файлов DVG/DXF больше чем 1")
+                #     continue
+                if len(file_ids) == 0:
+                    reported_errors.append(get_work_error() + "Нет файлов DVG/DXF")
+                    continue
+
+                thickness = 0
+                material = ""
+                for file_id in file_ids:
+                    # Sort details based on Thicknesses, Material
+                    filename = planfix_get(f"file/{file_id}?fields=name").json()["file"]["name"]
+                    filename = filename[0: filename.rfind(".")]
+
+                    detail_data = parse_filename(filename)
+                    if "error" in detail_data.keys():
+                        reported_errors.append(get_work_error() + detail_data["error"])
                         continue
 
-                    thickness = 0
-                    material = ""
-                    for file_id in file_ids:
-                        # Sort details based on Thicknesses, Material
-                        filename = planfix_get(f"file/{file_id}?fields=name").json()["file"]["name"]
-                        filename = filename[0: filename.rfind(".")]
+                    new_thickness = detail_data["thickness"]
+                    new_material = str(detail_data["material"]).upper()
 
-                        detail_data = parse_filename(filename)
-                        if "error" in detail_data.keys():
-                            reported_errors.append(get_work_error() + detail_data["error"])
-                            continue
+                    if thickness != 0 and thickness != new_thickness:
+                        reported_errors.append(get_work_error() + f"Все толщины должны быть одинаковыми")
+                        continue
+                    thickness = new_thickness
 
-                        new_thickness = detail_data["thickness"]
-                        new_material = str(detail_data["material"]).upper()
+                    if len(material) != 0 and material != new_material:
+                        reported_errors.append(get_work_error() + f"Все материалы должны быть одинаковыми")
+                        continue
+                    material = new_material
 
-                        if thickness != 0 and thickness != new_thickness:
-                            reported_errors.append(get_work_error() + f"Все толщины должны быть одинаковыми")
-                            continue
-                        thickness = new_thickness
+                    if material not in material_name_to_id:
+                        reported_errors.append(get_work_error() + f"Неизвестный материал \"{detail_data["material"]}\"")
+                        continue
 
-                        if len(material) != 0 and material != new_material:
-                            reported_errors.append(get_work_error() + f"Все материалы должны быть одинаковыми")
-                            continue
-                        material = new_material
+                    detail_task.dvg_file_ids.append(file_id)
 
-                        if material not in material_name_to_id:
-                            reported_errors.append(get_work_error() + f"Неизвестный материал \"{detail_data["material"]}\"")
-                            continue
+                if (work_type, thickness, material) not in unique_work:
+                    unique_work[(work_type, thickness, material)] = []
 
-                        detail_task.dvg_file_ids.append(file_id)
-
-                    if (work_type, thickness, material) not in unique_work:
-                        unique_work[(work_type, thickness, material)] = []
-
-                    unique_work[(work_type, thickness, material)].append(detail_task)
+                unique_work[(work_type, thickness, material)].append(detail_task)
 
         if len(reported_errors) != 0:
             error_message = ""
@@ -1337,15 +1347,15 @@ async def create_work_from_assembly(request: web.Request):
             response = planfix_post("task/", body)
             assembly_work_task_id = int(response.json()["id"])
 
-        body = {
-            "customFieldData": [
-                {
-                    "field": {"id": 105971},  # Работа (Заказ/Сборка)
-                    "value": assembly_work_task_id
-                }
-            ]
-        }
-        planfix_post(f"task/{assembly_id}?silent=false", body)
+            body = {
+                "customFieldData": [
+                    {
+                        "field": {"id": 105971},  # Работа (Заказ/Сборка)
+                        "value": assembly_work_task_id
+                    }
+                ]
+            }
+            planfix_post(f"task/{assembly_id}?silent=false", body)
 
         for (work, thickness, material) in unique_work.keys():
             detail_ids = []
@@ -1568,10 +1578,12 @@ async def complete_assembly_from_details(request: web.Request):
 
         task_id = int(body["task_id"])
         subtask_statuses = body["subtask_statuses"]
+        is_first_level_assembly = int(body["is_first_level_assembly"]) == 1
 
         logging.info("\ncomplete_assembly_from_details")
         logging.info("task_id %d", task_id)
         logging.info("subtask_statuses %s", subtask_statuses)
+        logging.info("is_first_level_assembly %s", "true" if is_first_level_assembly else "false")
 
         all_subtasks_complete = True
         for i in range(len(subtask_statuses)):
@@ -1583,8 +1595,12 @@ async def complete_assembly_from_details(request: web.Request):
         if all_subtasks_complete:
             logging.info("All subtasks tasks complete. Completing parent task")
 
+            complete_status = 3 # Завершенная
+            if is_first_level_assembly:
+                complete_status = 189 # Готово
+
             body = {
-                "status": {"id": 189}  # Готово
+                "status": {"id": complete_status}
             }
             planfix_post(f"task/{task_id}?silent=false", body)
 
