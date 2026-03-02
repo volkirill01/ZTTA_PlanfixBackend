@@ -1194,7 +1194,11 @@ async def create_work_from_assembly(request: web.Request):
         assembly_name = body["assembly_name"]
         assembly_parent_id = int(body["assembly_parent_id"])
         order_id = int(body["order_id"])
-        order_number = int(planfix_get(f"task/{order_id}?fields=105596&sourceId=0").json()["task"]["customFieldData"][0]["value"])
+        order_task = planfix_get(f"task/{order_id}?fields=name,105596,105971&sourceId=0").json()["task"]
+        logging.info("order_task %s", order_task)
+        order_name = order_task["name"]
+        order_number = int(order_task["customFieldData"][1]["value"])
+        order_work_task_id = int(order_task["customFieldData"][0]["value"]["id"] if order_task["customFieldData"][0]["value"] is not None else 0)
         details = body["details"]
         subtask_counts = body["subtask_counts"]
         work_belongs_to_assembly = body["work_belongs_to_assembly"]
@@ -1326,13 +1330,41 @@ async def create_work_from_assembly(request: web.Request):
             logging.info(f"Errors found in order: {error_message}")
             return web.json_response({"code": 1, "error_message": error_message})
 
-        assembly_work_task_id = 0
-        if len(unique_work) != 0:  # We have work to do
+        if len(unique_work) == 0:
+            pass # TODO: Move assembly to work status
+        else: # We have work to do
+            if order_work_task_id == 0:
+                body = {
+                    "name": f"{order_name} Работа({order_number})",
+                    "status": {"id": 186},  # Вывод У.П.
+                    "processId": 77665,  # Вывод У.П.
+                    "template": {"id": 15155},  # Работа
+                    "customFieldData": [
+                        {
+                            "field": {"id": 105873},  # Заказ
+                            "value": order_id
+                        }
+                    ]
+                }
+                response = planfix_post("task/", body)
+                order_work_task_id = int(response.json()["id"])
+
+                body = {
+                    "customFieldData": [
+                        {
+                            "field": {"id": 105971}, # "Работа (Заказ/Сборка)
+                            "value": order_work_task_id
+                        }
+                    ]
+                }
+                planfix_post(f"task/{order_id}?silent=false", body)
+
             body = {
                 "name": f"{assembly_name} Работа({order_number})",
                 "status": {"id": 186},  # Вывод У.П.
                 "processId": 77665,  # Вывод У.П.
                 "template": {"id": 15155},  # Работа
+                "parent": {"id": order_work_task_id},
                 "customFieldData": [
                     {
                         "field": {"id": 105873},  # Заказ
@@ -1357,84 +1389,84 @@ async def create_work_from_assembly(request: web.Request):
             }
             planfix_post(f"task/{assembly_id}?silent=false", body)
 
-        for (work, thickness, material) in unique_work.keys():
-            detail_ids = []
-            file_ids = []
-            cutting_user_group = -1
-            for detail in unique_work[(work, thickness, material)]:
-                detail_ids.append(detail.get_id())
-                file_ids += detail.dvg_file_ids
-                cutting_user_group = unique_work_cuttings_user_group[work]
+            for (work, thickness, material) in unique_work.keys():
+                detail_ids = []
+                file_ids = []
+                cutting_user_group = -1
+                for detail in unique_work[(work, thickness, material)]:
+                    detail_ids.append(detail.get_id())
+                    file_ids += detail.dvg_file_ids
+                    cutting_user_group = unique_work_cuttings_user_group[work]
 
-            body = {
-                "name": f"{unique_work_names[work]} {material}(Материал) {thickness}(Толщина) Работа({order_number})",
-                "status": {
-                    "id": 186  # Вывод У.П.
-                },
-                "processId": 77665,  # Вывод У.П.
-                "template": {"id": 15155},  # Работа
-                "parent": {"id": assembly_work_task_id},
-                "customFieldData": [
-                    {
-                        "field": {"id": 105873},  # Заказ
-                        "value": order_id
-                    },
-                    {
-                        "field": {"id": 106028},  # Сборка
-                        "value": assembly_id
-                    },
-                    {
-                        "field": {"id": 105881},  # Текущая Обработка
-                        "value": work
-                    },
-                    {
-                        "field": {"id": 105939},  # Детали
-                        "value": detail_ids
-                    },
-                    {
-                        "field": {"id": 106026}, # Неиспользованные детали
-                        "value": detail_ids
-                    },
-                    {
-                        "field": {"id": 105858},  # Толщина
-                        "value": thickness
-                    },
-                    {
-                        "field": {"id": 105889},  # Материал
-                        "value": material_name_to_id[material]
-                    },
-                    {
-                        "field": {"id": 105574},  # Файлы DWG/DXF
-                        "value": file_ids
-                    }
-                ]
-            }
-            response = planfix_post("task/", body)
-            work_task_id = int(response.json()["id"])
-
-            if cutting_user_group != -1:
-                work_task = planfix_get(f"task/{work_task_id}?fields=assignees&sourceId=0").json()["task"]
-                assignees = {"users": [], "groups": []}
-                if work_task.keys().__contains__("assignees"):
-                    assignees = work_task["assignees"]
-
-                old_user_list = []
-                for user in assignees["users"]:
-                    old_user_list.append({"id": "user:" + str(user["id"]).replace("user:", "")})
-                old_group_list = []
-                for group in assignees["groups"]:
-                    old_group_list.append({"id": int(group["id"])})
                 body = {
-                    "assignees": {
-                        "users": old_user_list,
-                        "groups": old_group_list
-                    }
+                    "name": f"{unique_work_names[work]} {material}(Материал) {thickness}(Толщина) Работа({order_number})",
+                    "status": {
+                        "id": 186  # Вывод У.П.
+                    },
+                    "processId": 77665,  # Вывод У.П.
+                    "template": {"id": 15155},  # Работа
+                    "parent": {"id": assembly_work_task_id},
+                    "customFieldData": [
+                        {
+                            "field": {"id": 105873},  # Заказ
+                            "value": order_id
+                        },
+                        {
+                            "field": {"id": 106028},  # Сборка
+                            "value": assembly_id
+                        },
+                        {
+                            "field": {"id": 105881},  # Текущая Обработка
+                            "value": work
+                        },
+                        {
+                            "field": {"id": 105939},  # Детали
+                            "value": detail_ids
+                        },
+                        {
+                            "field": {"id": 106026}, # Неиспользованные детали
+                            "value": detail_ids
+                        },
+                        {
+                            "field": {"id": 105858},  # Толщина
+                            "value": thickness
+                        },
+                        {
+                            "field": {"id": 105889},  # Материал
+                            "value": material_name_to_id[material]
+                        },
+                        {
+                            "field": {"id": 105574},  # Файлы DWG/DXF
+                            "value": file_ids
+                        }
+                    ]
                 }
+                response = planfix_post("task/", body)
+                work_task_id = int(response.json()["id"])
 
-                if not old_group_list.__contains__(cutting_user_group):
-                    body["assignees"]["groups"].append({"id": cutting_user_group})
+                if cutting_user_group != -1:
+                    work_task = planfix_get(f"task/{work_task_id}?fields=assignees&sourceId=0").json()["task"]
+                    assignees = {"users": [], "groups": []}
+                    if work_task.keys().__contains__("assignees"):
+                        assignees = work_task["assignees"]
 
-                planfix_post(f"task/{work_task_id}?silent=false", body)
+                    old_user_list = []
+                    for user in assignees["users"]:
+                        old_user_list.append({"id": "user:" + str(user["id"]).replace("user:", "")})
+                    old_group_list = []
+                    for group in assignees["groups"]:
+                        old_group_list.append({"id": int(group["id"])})
+                    body = {
+                        "assignees": {
+                            "users": old_user_list,
+                            "groups": old_group_list
+                        }
+                    }
+
+                    if not old_group_list.__contains__(cutting_user_group):
+                        body["assignees"]["groups"].append({"id": cutting_user_group})
+
+                    planfix_post(f"task/{work_task_id}?silent=false", body)
 
         return web.json_response({"code": 0})
     except Exception as e:
@@ -1841,74 +1873,6 @@ async def create_work_tasks_from_parent_task(request: web.Request):
         print_error(e)
         return web.HTTPOk()  # Planfix will sleep for 3 minutes if it receives error code, so always return 200
 
-
-# @routes.get("/create_tasks")
-# async def create_sub_tasks(request: web.Request):
-#     try:
-#         body = await request.json()
-#
-#         task_id = int(body["task_id"])
-#
-#         files = planfix_get(f"task/{task_id}?fields=105856").json()["task"]["customFieldData"][0]["value"]
-#         for file in files:
-#             file_data = planfix_get(f"file/{file}").json()["file"]
-#             file_name = file_data["name"]
-#             file_id = int(file_data["id"])
-#             filepath = os.path.join("resources", str(file_id) + ".dwg")
-#             logging.info(filepath)
-#             dwg_data = planfix_get(f"file/{file_id}/download").content
-#             download_file(filepath, dwg_data)
-#             convert_to_pdf(filepath)
-#             pdf_filepath = os.path.join("resources/tmp", filepath.split("\\")[-1].replace(".dwg", ".pdf")).replace("/", "\\")
-#             files = [
-#                 ('file', (file_name.replace(".dwg", ".pdf"), open(pdf_filepath, 'rb'), 'application/pdf'))
-#             ]
-#             headers = {
-#                 'Accept': 'application/json',
-#                 "Authorization": f"Bearer {BEARER_TOKEN}"
-#             }
-#             response = requests.request("POST", f"{BASE_URL}file/", headers=headers, files=files)
-#             new_file_id = int(response.json()["id"])
-#             body = {
-#                 "name": file_data["name"],
-#                 "description": "Описание!!!",
-#                 "processId": 77646, # Канбан: Тест1
-#                 "assigner": { "id": 79 }, # TODO: Don't work
-#                 "template": { "id": 12382 }, # Тест1_Подзадача
-#                 "parent": {
-#                     "id": task_id
-#                 },
-#                 "auditors": { # TODO: Don't work
-#                     "users": [
-#                         { "id": 15 }
-#                     ]
-#                 },
-#                 "assignees": { # TODO: Don't work
-#                     "users": [
-#                         { "id": 15 }
-#                     ]
-#                 },
-#                 "participants": { # TODO: Don't work
-#                     "users": [
-#                         { "id": 15 }
-#                     ]
-#                 },
-#                 "customFieldData": [
-#                     {
-#                         "field": {
-#                             "id": 105854
-#                         },
-#                         "value": [int(file_data["id"]), new_file_id]
-#                     }
-#                 ]
-#             }
-#             clean_dwg_files()
-#             planfix_post("task/", body)
-#         clean_tmp_files()
-#         return web.HTTPOk()
-#     except Exception as e:
-#         print_error(e)
-#         return web.HTTPOk() # Planfix will sleep for 3 minutes if it receives error code, so always return 200
 
 output_directory = os.path.abspath("resources/tmp")
 dxf_generator = DXFGenerator(output_directory)
