@@ -17,6 +17,8 @@ from structs import *
 
 import logging
 
+
+TEMPLATE_ASSEMBLY = 8732191
 TEMPLATE_DETAIL = 8732005
 TEMPLATE_WORK = 8732007
 
@@ -157,9 +159,10 @@ def parse_filename(filename: str):
 
 
 class Task:
-    def __init__(self, task_id: int, template_id: int):
+    def __init__(self, task_id: int, template_id: int, status_id: int):
         self.task_id = task_id
         self.template_id = template_id
+        self.status_id = status_id
         self.cutting_needed = None
         self.work_belongs_to_assembly = None
         self.work_belongs_to_order = None
@@ -172,6 +175,8 @@ class Task:
     def get_id(self):
         return self.task_id
 
+    def is_assembly_task(self):
+        return self.template_id == TEMPLATE_ASSEMBLY
     def is_detail_task(self):
         return self.template_id == TEMPLATE_DETAIL
     def is_work_task(self):
@@ -195,7 +200,7 @@ class Task:
 
     def print_children(self, level: int = 0):
         logging.info(
-            f"{'  ' * level}{self.task_id}{' cutting' if self.cutting_needed else ''}{' assembly_work' if self.work_belongs_to_assembly else ''}{' order_work' if self.work_belongs_to_order else ''}")  # planfix_get(f"task/{self._id}?fields=name&sourceId=0").json()["task"]["name"]
+            f"{'  ' * level}{self.task_id}({self.status_id}){' cutting' if self.cutting_needed else ''}{' assembly_work' if self.work_belongs_to_assembly else ''}{' order_work' if self.work_belongs_to_order else ''}")  # planfix_get(f"task/{self._id}?fields=name&sourceId=0").json()["task"]["name"]
         level += 1
         for child in self.children:
             child.print_children(level)
@@ -205,9 +210,9 @@ class Task:
 
 
 # TODO: This is not the best solution, we should just use parent task id's with children task id's instead of all of this template, children count nonsense
-def recreate_task_tree_from_list(order_id, task_ids, template_ids, subtask_counts, cutting_needed, work_belongs_to_assembly, work_belongs_to_order):
-    tasks = [Task(int(tid), int(tmpl_id)) for tid, tmpl_id in zip(task_ids, template_ids)]
-    root = Task(order_id, 0)
+def recreate_task_tree_from_list(order_id, task_ids, template_ids, subtask_counts, cutting_needed, work_belongs_to_assembly, work_belongs_to_order, task_status_ids):
+    tasks = [Task(int(tid), int(tmpl_id), int(st_id)) for tid, tmpl_id, st_id in zip(task_ids, template_ids, task_status_ids)]
+    root = Task(order_id, 0, -1)
 
     index = 0
     sub_index = 0
@@ -247,6 +252,135 @@ def recreate_task_tree_from_list(order_id, task_ids, template_ids, subtask_count
         root.add_child(parse_subtree())
 
     return root
+
+# When one task goes to status "Завершённая", moves next task in status "В очереди" to status passed by parameter "status_id"
+@routes.post("/change_task_status_when_previous_in_wait_goes_to_complete")
+async def change_task_status_when_previous_in_wait_goes_to_complete(request: web.Request):
+    global TEMPLATE_ASSEMBLY, TEMPLATE_DETAIL, TEMPLATE_WORK
+    try:
+        body = await request.json()
+
+        task_id = int(body["task_id"])
+        parent_id = int(body["parent_id"])
+        neighbor_ids = body["neighbor_ids"]
+        neighbor_template_ids = body["neighbor_template_ids"]
+        neighbor_counts = body["neighbor_counts"]
+        if type(neighbor_counts) == list and len(neighbor_counts) > 0 and type(neighbor_counts[0]) == list:
+            neighbor_counts = []
+        neighbor_task_status_ids = body["neighbor_task_status_ids"]
+        status_id = int(body["status_id"])
+
+        logging.info("\nchange_task_status_when_previous_in_wait_goes_to_complete")
+        logging.info("task_id %d", task_id)
+        logging.info("parent_id %d", parent_id)
+        logging.info("sub_task_ids %s", neighbor_ids)
+        logging.info("neighbor_template_ids %s", neighbor_template_ids)
+        logging.info("neighbor_counts %s", neighbor_counts)
+        logging.info("neighbor_task_status_ids %s", neighbor_task_status_ids)
+        logging.info("status_id %d", status_id)
+
+        _tmp = []
+        for i in range(len(neighbor_ids)):
+            _tmp.append("Нет")
+        parent_task_tree = recreate_task_tree_from_list(parent_id, neighbor_ids, neighbor_template_ids, neighbor_counts, _tmp, _tmp, _tmp, neighbor_task_status_ids)
+        parent_task_tree.print_children()
+
+        all_neighbors_complete = True
+        past_current_task = False
+        next_task_id = 0
+        for neighbor_task in parent_task_tree.children:
+            if past_current_task:
+                if neighbor_task.status_id == 237: # В очереди
+                    next_task_id = neighbor_task.task_id
+                    break
+
+            if neighbor_task.status_id != 3: # Завершенная
+                all_neighbors_complete = False
+                break
+
+            if neighbor_task.task_id == task_id:
+                past_current_task = True
+
+        logging.info("all_neighbors_complete %s", "true" if all_neighbors_complete else "false")
+        logging.info("next_task_id %d", next_task_id)
+
+        if not all_neighbors_complete or next_task_id == 0:
+            return web.HTTPOk()
+
+        body = {
+            "status": {"id": status_id}
+        }
+        planfix_post(f"task/{next_task_id}?silent=false", body)
+
+        return web.HTTPOk()
+    except Exception as e:
+        print_error(e)
+        return web.HTTPOk()  # Planfix will sleep for 3 minutes if it receives error code, so always return 200
+
+
+@routes.post("/change_work_status_to_work_or_wait_for_work")
+async def change_work_status_to_work_or_wait_for_work(request: web.Request):
+    global TEMPLATE_ASSEMBLY, TEMPLATE_DETAIL, TEMPLATE_WORK
+    try:
+        body = await request.json()
+
+        assembly_id = int(body["assembly_id"])
+        sub_task_ids = body["sub_task_ids"]
+        sub_task_template_ids = body["sub_task_template_ids"]
+        subtask_counts = body["subtask_counts"].split(",")
+
+        logging.info("\nchange_work_status_to_work_or_wait_for_work")
+        logging.info("assembly_id %d", assembly_id)
+        logging.info("sub_task_ids %s", sub_task_ids)
+        logging.info("sub_task_template_ids %s", sub_task_template_ids)
+        logging.info("subtask_counts %s", subtask_counts)
+
+        _tmp = []
+        _tmp2 = []
+        for i in range(len(sub_task_ids)):
+            _tmp.append("Нет")
+            _tmp2.append(-1)
+        task_tree = recreate_task_tree_from_list(assembly_id, sub_task_ids, sub_task_template_ids, subtask_counts, _tmp, _tmp, _tmp, _tmp2)
+        task_tree.print_children()
+
+        for task in task_tree.get_all_children():
+            match task.template_id:
+                case template_id if template_id == TEMPLATE_ASSEMBLY:
+                    body = {
+                        "status": {"id": 2} # В работе
+                    }
+                    planfix_post(f"task/{task.task_id}?silent=false", body)
+
+                case template_id if template_id == TEMPLATE_DETAIL:
+                    body = {
+                        "status": {"id": 2} # В работе
+                    }
+                    planfix_post(f"task/{task.task_id}?silent=false", body)
+
+                    is_first = True
+                    for work_task in task.children:
+                        body = {
+                            "status": {"id": 237} # В очереди
+                        }
+                        if is_first:
+                            body["status"]["id"] = 228 # Принять работу
+                            body["customFieldData"] = [
+                                {
+                                    "field": {"id": 105967}, # Принять работу
+                                    "value": get_list_field_values(14510, 105967)[0] # Принять работу
+                                }
+                            ]
+
+                        planfix_post(f"task/{work_task.task_id}?silent=false", body)
+                        is_first = False
+
+                case template_id if template_id == TEMPLATE_WORK:
+                    pass
+
+        return web.HTTPOk()
+    except Exception as e:
+        print_error(e)
+        return web.HTTPOk()  # Planfix will sleep for 3 minutes if it receives error code, so always return 200
 
 
 @routes.post("/copy_assembly_status_to_order")
@@ -423,117 +557,6 @@ async def set_current_work_to_parent_and_movement_between_departments(request: w
         return web.HTTPOk()  # Planfix will sleep for 3 minutes if it receives error code, so always return 200
 
 
-@routes.post("/reset_order_after_return_from_work")
-async def reset_order_after_return_from_work(request: web.Request):
-    try:
-        body = await request.json()
-
-        order_id = int(body["order_id"])
-        sub_task_ids = body["sub_task_ids"]
-        sub_task_template_ids = body["sub_task_template_ids"]
-        work_belongs_to_assembly = body["work_belongs_to_assembly"]
-        work_belongs_to_order = body["work_belongs_to_order"]
-        subtask_counts = body["subtask_counts"].split(",")
-
-        logging.info("\nreset_order_after_return_from_work")
-        logging.info("sub_task_ids %s", sub_task_ids)
-        logging.info("sub_task_template_ids %s", sub_task_template_ids)
-        logging.info("work_belongs_to_assembly %s", work_belongs_to_assembly)
-        logging.info("work_belongs_to_order %s", work_belongs_to_order)
-        logging.info("subtask_counts %s", subtask_counts)
-
-        _tmp = []
-        for i in range(len(sub_task_ids)):
-            _tmp.append("Нет")
-        task_tree = recreate_task_tree_from_list(order_id, sub_task_ids, sub_task_template_ids, subtask_counts, _tmp, work_belongs_to_assembly, work_belongs_to_order)
-        task_tree.print_children()
-
-        all_children = task_tree.get_all_children()
-        for child_task in all_children:
-            if child_task.template_id == 8732007:  # Работа
-                if child_task.work_belongs_to_assembly:
-                    body = {
-                        "status": {"id": 207},  # Конструкторский отдел
-                        "customFieldData": [
-                            {
-                                "field": {"id": 105947},  # Удалить задачу
-                                "value": False
-                            }
-                        ]
-                    }
-                    planfix_post(f"task/{child_task.get_id()}?silent=false", body)
-                elif child_task.work_belongs_to_order:
-                    body = {
-                        "status": {"id": 207},  # Конструкторский отдел
-                        "customFieldData": [
-                            {
-                                "field": {"id": 105947},  # Удалить задачу
-                                "value": False
-                            }
-                        ]
-                    }
-                    planfix_post(f"task/{child_task.get_id()}?silent=false", body)
-            elif child_task.template_id == 8732005:  # Деталь
-                detail_work = planfix_get(f"task/{child_task.get_id()}?fields=105879&sourceId=0").json()["task"]["customFieldData"][0]["value"]  # 105879 - Типы обработки
-                body = {
-                    "customFieldData": [
-                        {
-                            "field": {"id": 105881},  # Текущая Обработка
-                            "value": {"id": detail_work[0]["id"]}
-                        }
-                    ]
-                }
-                planfix_post(f"task/{child_task.get_id()}?silent=false", body)
-
-        # Sleeping and sending requests in that particular order is necessary because of Planfix limitations
-        sleep(1)
-        is_first_work = True
-        for child_task in all_children:
-            if child_task.template_id == 8732007:  # Работа
-                if child_task.work_belongs_to_assembly:
-                    body = {
-                        "customFieldData": [
-                            {
-                                "field": {"id": 105947},  # Удалить задачу
-                                "value": True
-                            }
-                        ]
-                    }
-                    planfix_post(f"task/{child_task.get_id()}?silent=false", body)
-                elif child_task.work_belongs_to_order:
-                    body = {
-                        "customFieldData": [
-                            {
-                                "field": {"id": 105947},  # Удалить задачу
-                                "value": True
-                            }
-                        ]
-                    }
-                    planfix_post(f"task/{child_task.get_id()}?silent=false", body)
-                else:
-                    body = {
-                        "customFieldData": [
-                            {
-                                "field": {"id": 105967},  # Принять работу
-                                "value": ""
-                            }
-                        ]
-                    }
-                    if not is_first_work:
-                        body["status"] = {"id": 0}  # Черновик
-
-                    planfix_post(f"task/{child_task.get_id()}?silent=false", body)
-
-                is_first_work = False
-            else:
-                is_first_work = True
-
-        return web.HTTPOk()
-    except Exception as e:
-        print_error(e)
-        return web.HTTPOk()  # Planfix will sleep for 3 minutes if it receives error code, so always return 200
-
-
 @routes.post("/reset_assembly_after_return_from_work")
 async def reset_assembly_after_return_from_work(request: web.Request):
     try:
@@ -555,9 +578,11 @@ async def reset_assembly_after_return_from_work(request: web.Request):
         logging.info("subtask_counts %s", subtask_counts)
 
         _tmp = []
+        _tmp2 = []
         for i in range(len(sub_task_ids)):
             _tmp.append("Нет")
-        task_tree = recreate_task_tree_from_list(assembly_id, sub_task_ids, sub_task_template_ids, subtask_counts, _tmp, work_belongs_to_assembly, work_belongs_to_order)
+            _tmp2.append(-1)
+        task_tree = recreate_task_tree_from_list(assembly_id, sub_task_ids, sub_task_template_ids, subtask_counts, _tmp, work_belongs_to_assembly, work_belongs_to_order, _tmp2)
         task_tree.print_children()
 
         all_children = task_tree.get_all_children()
@@ -599,7 +624,6 @@ async def reset_assembly_after_return_from_work(request: web.Request):
 
         # Sleeping and sending requests in that particular order is necessary because of Planfix limitations
         sleep(1)
-        is_first_work = True
         for child_task in all_children:
             if child_task.template_id == 8732007:  # Работа
                 if child_task.work_belongs_to_assembly:
@@ -631,14 +655,7 @@ async def reset_assembly_after_return_from_work(request: web.Request):
                             }
                         ]
                     }
-                    if not is_first_work:
-                        body["status"] = {"id": 0}  # Черновик
-
                     planfix_post(f"task/{child_task.get_id()}?silent=false", body)
-
-                is_first_work = False
-            else:
-                is_first_work = True
 
         return web.HTTPOk()
     except Exception as e:
@@ -972,7 +989,10 @@ async def create_work_from_order(request: web.Request):
         work_belongs_to_order = []
         for i in range(len(input_detail_ids)):
             work_belongs_to_order.append('Нет')
-        order_task_tree = recreate_task_tree_from_list(order_id, input_detail_ids, input_detail_templates, subtask_counts, input_detail_cutting_needed, work_belongs_to_assembly, work_belongs_to_order)
+        _tmp = []
+        for i in range(len(input_detail_ids)):
+            _tmp.append(-1)
+        order_task_tree = recreate_task_tree_from_list(order_id, input_detail_ids, input_detail_templates, subtask_counts, input_detail_cutting_needed, work_belongs_to_assembly, work_belongs_to_order, _tmp)
         order_task_tree.print_children()
 
         material_directory = planfix_post("directory/19/entry/list", {"offset": 0, "pageSize": 100, "fields": "key,33", "groupsOnly": False}).json()["directoryEntries"]
@@ -1198,7 +1218,7 @@ async def create_work_from_assembly(request: web.Request):
         logging.info("order_task %s", order_task)
         order_name = order_task["name"]
         order_number = int(order_task["customFieldData"][1]["value"])
-        order_work_task_id = int(order_task["customFieldData"][0]["value"]["id"] if order_task["customFieldData"][0]["value"] is not None else 0)
+        order_work_task_id = int(order_task["customFieldData"][0]["value"]["id"] if "value" in order_task["customFieldData"][0] and order_task["customFieldData"][0]["value"] is not None else 0)
         details = body["details"]
         subtask_counts = body["subtask_counts"]
         work_belongs_to_assembly = body["work_belongs_to_assembly"]
@@ -1221,8 +1241,11 @@ async def create_work_from_assembly(request: web.Request):
         input_detail_ids = details[0]
         input_detail_templates = details[1]
         input_detail_cutting_needed = details[2]
+        _tmp = []
+        for i in range(len(input_detail_ids)):
+            _tmp.append(-1)
 
-        assembly_task_tree = recreate_task_tree_from_list(assembly_id, input_detail_ids, input_detail_templates, subtask_counts, input_detail_cutting_needed, work_belongs_to_assembly, work_belongs_to_order)
+        assembly_task_tree = recreate_task_tree_from_list(assembly_id, input_detail_ids, input_detail_templates, subtask_counts, input_detail_cutting_needed, work_belongs_to_assembly, work_belongs_to_order, _tmp)
         assembly_task_tree.print_children()
 
         material_directory = planfix_post("directory/19/entry/list", {"offset": 0, "pageSize": 100, "fields": "key,33", "groupsOnly": False}).json()["directoryEntries"]
@@ -1784,35 +1807,30 @@ async def create_work_tasks_from_parent_task(request: web.Request):
         logging.info("is_assembly %s", "true" if is_assembly else "false")
         logging.info("is_order %s", "true" if is_order else "false")
 
-        tasks_to_turn_into_draft = []
-
         is_first = True
         for i in range(len(work_to_order[0])):
-            turn_task_to_draft = False
-
             if is_assembly and not is_order:
                 body = {
-                    "status": {"id": 207},  # Конструкторский отдел
-                    "processId": 77663,  # Производство
+                    "status": {"id": 237}, # В очереди
+                    "processId": 77663, # Производство
                     "customFieldData": [
                         {
-                            "field": {"id": 105931},  # Текущая Обработка (Сборка)
+                            "field": {"id": 105931}, # Текущая Обработка (Сборка)
                             "value": {"id": int(work_to_order[0][i])}
                         },
                         {
-                            "field": {"id": 105945},  # Работа для сборки
+                            "field": {"id": 105945}, # Работа для сборки
                             "value": True
                         }
                     ]
                 }
-                turn_task_to_draft = True
             elif not is_assembly and not is_order:
                 body = {
-                    "status": {"id": 207},  # Конструкторский отдел
-                    "processId": 77657,  # Конструкторский отдел и Раскрой
+                    "status": {"id": 207}, # Конструкторский отдел
+                    "processId": 77657, # Конструкторский отдел
                     "customFieldData": [
                         {
-                            "field": {"id": 105881},  # Текущая Обработка
+                            "field": {"id": 105881}, # Текущая Обработка
                             "value": {"id": int(work_to_order[0][i])}
                         }
                     ]
@@ -1823,12 +1841,9 @@ async def create_work_tasks_from_parent_task(request: web.Request):
                         "customFieldData": body["customFieldData"]
                     }
                     planfix_post(f"task/{task_id}?silent=false", parent_body)
-
-                if not is_first:
-                    turn_task_to_draft = True
             elif not is_assembly and is_order:
                 body = {
-                    "status": {"id": 207},  # Конструкторский отдел
+                    "status": {"id": 237},  # В очереди
                     "processId": 77663,  # Производство
                     "customFieldData": [
                         {
@@ -1845,7 +1860,6 @@ async def create_work_tasks_from_parent_task(request: web.Request):
                         }
                     ]
                 }
-                turn_task_to_draft = True
             else:
                 raise Exception(f"Unhandled work_creation from: is_assembly={is_assembly}, is_order={is_order}")
 
@@ -1856,17 +1870,8 @@ async def create_work_tasks_from_parent_task(request: web.Request):
                 "field": {"id": 105873},  # Заказ
                 "value": order_id
             })
-            response = planfix_post("task/", body)
-            if turn_task_to_draft:
-                tasks_to_turn_into_draft.append(int(response.json()["id"]))
-
+            planfix_post("task/", body)
             is_first = False
-
-        for task_to_draft in tasks_to_turn_into_draft:
-            body = {
-                "status": {"id": 0}  # Черновик
-            }
-            planfix_post(f"task/{task_to_draft}?silent=false", body)
 
         return web.HTTPOk()
     except Exception as e:
