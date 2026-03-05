@@ -549,7 +549,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                             }
                         ]
                     }
-                    planfix_post(f"task/{order_id}?silent=false", body)
+                    planfix_post(f"task/{order_id}?silent=true", body)
 
                 body = {
                     "name": f"{assembly_name} Работа({order_number})",
@@ -579,7 +579,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                         }
                     ]
                 }
-                planfix_post(f"task/{assembly_id}?silent=false", body)
+                planfix_post(f"task/{assembly_id}?silent=true", body)
 
                 for (work, thickness, material) in unique_cutting_work.keys():
                     detail_ids = []
@@ -674,7 +674,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                     "value": True
                 })
 
-            planfix_post(f"task/{assembly_id}?silent=false", body)
+            planfix_post(f"task/{assembly_id}?silent=true", body)
 
         return web.json_response({"code": 0})
     except Exception as e:
@@ -866,7 +866,7 @@ async def recalculate_unused_details(request: web.Request):
                 }
             ]
         }
-        planfix_post(f"task/{work_task_id}?silent=false", body)
+        planfix_post(f"task/{work_task_id}?silent=true", body)
 
         return web.HTTPOk()
     except Exception as e:
@@ -1027,7 +1027,7 @@ async def reset_assembly_after_return_from_work(request: web.Request):
                             }
                         ]
                     }
-                    planfix_post(f"task/{child_task.get_id()}?silent=false", body)
+                    planfix_post(f"task/{child_task.get_id()}?silent=true", body)
                 elif child_task.work_belongs_to_order:
                     body = {
                         "status": {"id": 207},  # Конструкторский отдел
@@ -1038,7 +1038,7 @@ async def reset_assembly_after_return_from_work(request: web.Request):
                             }
                         ]
                     }
-                    planfix_post(f"task/{child_task.get_id()}?silent=false", body)
+                    planfix_post(f"task/{child_task.get_id()}?silent=true", body)
             elif child_task.template_id == 8732005:  # Деталь
                 detail_work = planfix_get(f"task/{child_task.get_id()}?fields=105879&sourceId=0").json()["task"]["customFieldData"][0]["value"]  # 105879 - Типы обработки
                 body = {
@@ -1049,7 +1049,7 @@ async def reset_assembly_after_return_from_work(request: web.Request):
                         }
                     ]
                 }
-                planfix_post(f"task/{child_task.get_id()}?silent=false", body)
+                planfix_post(f"task/{child_task.get_id()}?silent=true", body)
 
         # Sleeping and sending requests in that particular order is necessary because of Planfix limitations
         sleep(1)
@@ -1064,7 +1064,7 @@ async def reset_assembly_after_return_from_work(request: web.Request):
                             }
                         ]
                     }
-                    planfix_post(f"task/{child_task.get_id()}?silent=false", body)
+                    planfix_post(f"task/{child_task.get_id()}?silent=true", body)
                 elif child_task.work_belongs_to_order:
                     body = {
                         "customFieldData": [
@@ -1074,7 +1074,7 @@ async def reset_assembly_after_return_from_work(request: web.Request):
                             }
                         ]
                     }
-                    planfix_post(f"task/{child_task.get_id()}?silent=false", body)
+                    planfix_post(f"task/{child_task.get_id()}?silent=true", body)
                 else:
                     body = {
                         "customFieldData": [
@@ -1084,7 +1084,7 @@ async def reset_assembly_after_return_from_work(request: web.Request):
                             }
                         ]
                     }
-                    planfix_post(f"task/{child_task.get_id()}?silent=false", body)
+                    planfix_post(f"task/{child_task.get_id()}?silent=true", body)
 
         return web.HTTPOk()
     except Exception as e:
@@ -1221,7 +1221,7 @@ async def copy_parent_status_to_children(request: web.Request):
             if parent_status_id == child_status_id:
                 continue
 
-            planfix_post(f"task/{child_id}?silent=false", body)
+            planfix_post(f"task/{child_id}?silent=true", body)
 
         return web.HTTPOk()
     except Exception as e:
@@ -1385,7 +1385,7 @@ async def create_cutting_from_work(request: web.Request):
         body = {
             "name": f"Раскрой листа №{cutting_count} {work_name}",
         }
-        planfix_post(f"task/{task_id}?silent=false", body)
+        planfix_post(f"task/{task_id}?silent=true", body)
 
         return web.HTTPOk()
     except Exception as e:
@@ -1438,7 +1438,7 @@ async def complete_order(request: web.Request):
                         "processId": 77659,  # Складское хозяйство
                         "status": {"id": 189}  # Готово
                     }
-                    planfix_post(f"task/{int(task_id)}?silent=false", body)
+                    planfix_post(f"task/{int(task_id)}?silent=true", body)
 
         return web.HTTPOk()
     except Exception as e:
@@ -1736,7 +1736,7 @@ async def create_work_tasks_from_parent_task(request: web.Request):
                     parent_body = {
                         "customFieldData": body["customFieldData"]
                     }
-                    planfix_post(f"task/{task_id}?silent=false", parent_body)
+                    planfix_post(f"task/{task_id}?silent=true", parent_body)
             elif not is_assembly and is_order:
                 body = {
                     "status": {"id": 237},  # В очереди
