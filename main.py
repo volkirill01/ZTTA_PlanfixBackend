@@ -21,7 +21,8 @@ TEMPLATE_ASSEMBLY = 8732191
 TEMPLATE_DETAIL = 8732005
 TEMPLATE_WORK = 8732007
 
-ERROR_HTML_COLOR = "#E74C3C"
+HTML_COLOR_ERROR = "#E74C3C"
+HTML_COLOR_ACCENT = "#CC00CC"
 
 HOST = os.getenv('HOST', '0.0.0.0')
 PORT = int(os.getenv('PORT', 10210))
@@ -32,6 +33,17 @@ tmp_dir = os.path.abspath("resources/tmp")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+def get_parent_main_assembly(task_id):
+    task_data = {}
+    parent_task = -1
+
+    while ("customFieldData" not in task_data or not task_data["customFieldData"][0]["value"]) and task_id != -1:
+        task_data = planfix_get(f"task/{task_id}?fields=parent,106030&sourceId=0").json()["task"]
+        if "customFieldData" not in task_data or not task_data["customFieldData"][0]["value"]:
+            parent_task = int(task_data["parent"]["id"]) if "parent" in task_data else -1
+            task_id = parent_task
+
+    return parent_task
 
 def send_assembly_to_revision(assembly_id, reported_errors, revision_cause):
     error_message = ""
@@ -43,6 +55,7 @@ def send_assembly_to_revision(assembly_id, reported_errors, revision_cause):
 
     body = {
         "status": {"id": 207}, # Конструкторский отдел
+        "processId": 77657, # Конструкторский отдел
         "customFieldData": [
             {
                 "field": {"id": 105921}, # Причина возврата на доработку
@@ -290,6 +303,171 @@ def recreate_task_tree_from_list(order_id, task_ids, template_ids, subtask_count
     return root
 
 
+def assembly_needs_revision(assembly_process_id, assembly_status_id):
+    match assembly_process_id:
+        case 77663:  # Производство
+            return True
+
+        case 77657:  # Конструкторский отдел
+            if assembly_status_id != 207:  # Конструкторский отдел
+                return True
+
+    return False
+
+
+def field_changed_send_assembly_to_revision(field_name, current_user, current_time, revision_cause_task_id):
+    assembly_id = get_parent_main_assembly(revision_cause_task_id)
+    logging.info("assembly_id: %d", assembly_id)
+    if assembly_id == -1:
+        assembly_id = revision_cause_task_id
+
+    assembly_data = planfix_get(f"task/{assembly_id}?fields=name,status,processId&sourceId=0").json()["task"]
+    assembly_process_id = assembly_data["processId"]
+    assembly_status_id = assembly_data["status"]["id"]
+
+    if assembly_needs_revision(assembly_process_id, assembly_status_id):
+        revision_cause_task_data = planfix_get(f"task/{revision_cause_task_id}?fields=name,template,parent&sourceId=0").json()["task"]
+        revision_cause_task_parent_id = revision_cause_task_data["parent"]["id"]
+        revision_cause_task_parent_name = planfix_get(f"task/{revision_cause_task_parent_id}?fields=name&sourceId=0").json()["task"]["name"]
+        revision_cause_task_template_id = revision_cause_task_data["template"]["id"]
+
+
+        cause_task_path = ''
+        match revision_cause_task_template_id:
+            case 14510: # Обработка
+                cause_task_path += (f'<a href="https://ztta.planfix.com/task/{revision_cause_task_parent_id}">{revision_cause_task_parent_name}</a>' +
+                                    ' &rarr; ' +
+                                    f'<a href="https://ztta.planfix.com/task/{revision_cause_task_id}">{revision_cause_task_data["name"]}</a>')
+            case _:
+                cause_task_path += f'<a href="https://ztta.planfix.com/task/{revision_cause_task_id}">{revision_cause_task_data["name"]}</a>'
+
+        error_message = (cause_task_path +
+                         ': ' +
+                         f'<span style="color: {HTML_COLOR_ERROR};">Изменено значение поля</span> "{field_name}"')
+
+        send_assembly_to_revision(assembly_id, [error_message],
+                                  f'{current_user} ' +
+                                  'в ' +
+                                  f'<span style="color: {HTML_COLOR_ACCENT};">{current_time}</span> ' +
+                                  f'<span style="color: {HTML_COLOR_ERROR};">вернул на доработку</span> ' +
+                                  'из ' +
+                                  f'<span style="color: {HTML_COLOR_ACCENT};">"{assembly_data["status"]["name"]}"</span>\n' +
+                                  'Причину смотреть в "Комментарий для доработки"')
+
+
+@routes.post("/field_changed_send_assembly_to_revision")
+async def field_changed_send_assembly_to_revision_(request: web.Request):
+    try:
+        body = await request.json()
+
+        task_id = int(body["task_id"])
+        current_user = body["current_user"]
+        current_time = body["current_time"]
+        field_name = body["field_name"]
+
+        logging.info("\nfield_changed_send_assembly_to_revision")
+        logging.info("task_id %d", task_id)
+        logging.info("current_user %s", current_user)
+        logging.info("current_time %s", current_time)
+        logging.info("field_name %s", field_name)
+
+        field_changed_send_assembly_to_revision(field_name, current_user, current_time, task_id)
+        return web.HTTPOk()
+    except Exception as e:
+        print_error(e)
+        return web.HTTPOk() # Planfix will sleep for 3 minutes if it receives error code, so always return 200
+
+
+@routes.post("/update_work_tasks_or_send_assembly_to_revision")
+async def update_work_tasks_or_send_assembly_to_revision(request: web.Request):
+    try:
+        body = await request.json()
+
+        detail_id = int(body["detail_id"])
+        order_id = int(body["order_id"])
+        work_type_ids = list(map(int, body["work_type_ids"]))
+        work_type_names = body["work_type_names"]
+        sub_task_work_type_ids = list(map(int, body["sub_task_work_type_ids"]))
+        sub_task_work_type_names = body["sub_task_work_type_names"]
+        sub_task_work_ids = list(map(int, body["sub_task_work_ids"]))
+
+        logging.info("\nupdate_work_tasks_or_send_assembly_to_revision")
+        logging.info("detail_id %d", detail_id)
+        logging.info("order_id %d", order_id)
+        logging.info("work_type_ids %s", work_type_ids)
+        logging.info("work_type_names %s", work_type_names)
+        logging.info("sub_task_work_type_ids %s", sub_task_work_type_ids)
+        logging.info("sub_task_work_type_names %s", sub_task_work_type_names)
+        logging.info("sub_task_work_ids %s", sub_task_work_ids)
+
+        old_dict = dict(zip(sub_task_work_type_ids, sub_task_work_type_names))
+        new_ids_set = set(work_type_ids)
+        removed_work_types = [
+            {"work_type_id": id_, "work_type_name": name, "task_id": task_id}
+            for id_, name, task_id in zip(sub_task_work_type_ids, sub_task_work_type_names, sub_task_work_ids)
+            if id_ not in new_ids_set
+        ]
+        new_dict = dict(zip(work_type_ids, work_type_names))
+        added_work_types = [
+            {"work_type_id": id_, "work_type_name": new_dict[id_]}
+            for id_ in work_type_ids
+            if id_ not in old_dict
+        ]
+        logging.info("removed: %s", removed_work_types)
+        logging.info("added:   %s", added_work_types)
+
+        for removed_work in removed_work_types:
+            body = {
+                "customFieldData": [
+                    {
+                        "field": { "id": 105947 }, # Удалить задачу
+                        "value": True
+                    }
+                ]
+            }
+            planfix_post(f"task/{removed_work["task_id"]}?silent=false", body)
+
+        for added_work in added_work_types:
+            body = {
+                "status": {"id": 207}, # Конструкторский отдел
+                "processId": 77657, # Конструкторский отдел
+                "template": 14510, # Обработка
+                "parent": {"id": detail_id},
+                "name": added_work["work_type_name"],
+                "customFieldData": [
+                    {
+                        "field": {"id": 105881}, # Текущая Обработка
+                        "value": added_work["work_type_id"]
+                    },
+                    {
+                        "field": {"id": 105873}, # Заказ
+                        "value": order_id
+                    }
+                ],
+            }
+            planfix_post(f"task", body)
+
+        to_remove = [{"work_type_id": item["work_type_id"], "work_type_name": item["work_type_name"]} for item in removed_work_types]
+        kept = [{"work_type_id": item[0], "work_type_name": item[1]} for item in zip(sub_task_work_type_ids, sub_task_work_type_names) if {"work_type_id": item[0], "work_type_name": item[1]} not in to_remove]
+        final_list = kept + added_work_types
+        new_first = final_list[0] if final_list else {"work_type_id": -1, "work_type_name": ""}
+        logging.info("new_first: %s", new_first)
+
+        body = {
+            "customFieldData": [
+                {
+                    "field": {"id": 105881}, # Текущая Обработка
+                    "value": new_first["work_type_id"]
+                }
+            ],
+        }
+        planfix_post(f"task/{detail_id}?silent=false", body)
+        return web.HTTPOk()
+    except Exception as e:
+        print_error(e)
+        return web.HTTPOk() # Planfix will sleep for 3 minutes if it receives error code, so always return 200
+
+
 @routes.post("/validate_files_in_assembly_and_create_work")
 async def validate_files_in_assembly_and_create_work(request: web.Request):
     try:
@@ -399,13 +577,13 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                     if is_order_commercial and len(cost_calculation_files) == 0:
                         reported_errors.append(f'<a href="https://ztta.planfix.com/task/{sub_task.get_id()}">{get_task_name(sub_task.get_id())}</a>' +
                                                ': ' +
-                                               f'<span style="color:{ERROR_HTML_COLOR};">Нет файлов простчёта</span>')
+                                               f'<span style="color:{HTML_COLOR_ERROR};">Нет файлов простчёта</span>')
                         has_missing_files = True
 
                     if assembly_welding_confirmation_needed and len(drawing_files) == 0:
                         reported_errors.append(f'<a href="https://ztta.planfix.com/task/{sub_task.get_id()}">{get_task_name(sub_task.get_id())}</a>' +
                                                ': ' +
-                                               f'<span style="color:{ERROR_HTML_COLOR};">Нет файлов чертежей</span>')
+                                               f'<span style="color:{HTML_COLOR_ERROR};">Нет файлов чертежей</span>')
                         has_missing_files = True
 
                 case template_id if template_id == TEMPLATE_WORK:
@@ -420,7 +598,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                                                ' &rarr; ' +
                                                f'<a href="https://ztta.planfix.com/task/{sub_task.get_id()}">{get_task_name(sub_task.get_id())}</a>' +
                                                ': ' +
-                                               f'<span style="color:{ERROR_HTML_COLOR};">{message}</span>')
+                                               f'<span style="color:{HTML_COLOR_ERROR};">{message}</span>')
 
 
                     work_files_is_missing = False
@@ -484,23 +662,23 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
             if is_order_commercial and len(assembly_cost_calculation_files) == 0:
                 reported_errors.append(f'<a href="https://ztta.planfix.com/task/{assembly_id}">{get_task_name(assembly_id)}</a>' +
                                        ': ' +
-                                       f'<span style="color:{ERROR_HTML_COLOR};">Нет файлов простчёта</span>')
+                                       f'<span style="color:{HTML_COLOR_ERROR};">Нет файлов простчёта</span>')
                 has_missing_files = True
         if True in assembly_needs_welding_confirmation:
             if len(assembly_drawing_files) == 0:
                 reported_errors.append(f'<a href="https://ztta.planfix.com/task/{assembly_id}">{get_task_name(assembly_id)}</a>' +
                                        ': ' +
-                                       f'<span style="color:{ERROR_HTML_COLOR};">Нет файлов чертежей</span>')
+                                       f'<span style="color:{HTML_COLOR_ERROR};">Нет файлов чертежей</span>')
                 has_missing_files = True
 
         if len(reported_errors) != 0:
             error_causes = []
 
             if has_missing_files:
-                error_causes.append(f'<span style="color:{ERROR_HTML_COLOR};">Недостающие файлы</span>')
+                error_causes.append(f'<span style="color:{HTML_COLOR_ERROR};">Недостающие файлы</span>')
                 pass
             if has_wrong_file_names:
-                error_causes.append(f'<span style="color:{ERROR_HTML_COLOR};">Ошибки в названии файлов</span>')
+                error_causes.append(f'<span style="color:{HTML_COLOR_ERROR};">Ошибки в названии файлов</span>')
                 pass
 
             error_cause = ''
@@ -1016,73 +1194,89 @@ async def reset_assembly_after_return_from_work(request: web.Request):
 
         all_children = task_tree.get_all_children()
         for child_task in all_children:
-            if child_task.template_id == 8732007:  # Работа
-                if child_task.work_belongs_to_assembly:
+            match child_task.template_id:
+                case template_id if template_id == TEMPLATE_ASSEMBLY:
+                    body = {
+                        "status": {"id": 207},  # Конструкторский отдел
+                    }
+                    planfix_post(f"task/{child_task.get_id()}?silent=true", body)
+                case template_id if template_id == TEMPLATE_DETAIL:
+                    detail_work = planfix_get(f"task/{child_task.get_id()}?fields=105879&sourceId=0").json()["task"]["customFieldData"][0]["value"]  # 105879 - Типы обработки
                     body = {
                         "status": {"id": 207},  # Конструкторский отдел
                         "customFieldData": [
                             {
-                                "field": {"id": 105947},  # Удалить задачу
-                                "value": False
+                                "field": {"id": 105881},  # Текущая Обработка
+                                "value": {"id": detail_work[0]["id"]}
                             }
                         ]
                     }
                     planfix_post(f"task/{child_task.get_id()}?silent=true", body)
-                elif child_task.work_belongs_to_order:
-                    body = {
-                        "status": {"id": 207},  # Конструкторский отдел
-                        "customFieldData": [
-                            {
-                                "field": {"id": 105947},  # Удалить задачу
-                                "value": False
-                            }
-                        ]
-                    }
-                    planfix_post(f"task/{child_task.get_id()}?silent=true", body)
-            elif child_task.template_id == 8732005:  # Деталь
-                detail_work = planfix_get(f"task/{child_task.get_id()}?fields=105879&sourceId=0").json()["task"]["customFieldData"][0]["value"]  # 105879 - Типы обработки
-                body = {
-                    "customFieldData": [
-                        {
-                            "field": {"id": 105881},  # Текущая Обработка
-                            "value": {"id": detail_work[0]["id"]}
+                case template_id if template_id == TEMPLATE_WORK:
+                    if child_task.work_belongs_to_assembly:
+                        body = {
+                            "status": {"id": 207},  # Конструкторский отдел
+                            "customFieldData": [
+                                {
+                                    "field": {"id": 105947},  # Удалить задачу
+                                    "value": False
+                                }
+                            ]
                         }
-                    ]
-                }
-                planfix_post(f"task/{child_task.get_id()}?silent=true", body)
+                        planfix_post(f"task/{child_task.get_id()}?silent=true", body)
+                    elif child_task.work_belongs_to_order:
+                        body = {
+                            "status": {"id": 207},  # Конструкторский отдел
+                            "customFieldData": [
+                                {
+                                    "field": {"id": 105947},  # Удалить задачу
+                                    "value": False
+                                }
+                            ]
+                        }
+                        planfix_post(f"task/{child_task.get_id()}?silent=true", body)
 
-        # Sleeping and sending requests in that particular order is necessary because of Planfix limitations
+        # Sleeping and sending requests in that particular order is necessary because we need to trigger Planfix script that triggers on process change, not status change
         sleep(1)
         for child_task in all_children:
-            if child_task.template_id == 8732007:  # Работа
-                if child_task.work_belongs_to_assembly:
+            match child_task.template_id:
+                case template_id if template_id == TEMPLATE_WORK:
+                    if child_task.work_belongs_to_assembly:
+                        body = {
+                            "processId": 77657, # Конструкторский отдел
+                            "customFieldData": [
+                                {
+                                    "field": {"id": 105947}, # Удалить задачу
+                                    "value": True
+                                }
+                            ]
+                        }
+                        planfix_post(f"task/{child_task.get_id()}?silent=true", body)
+                    elif child_task.work_belongs_to_order:
+                        body = {
+                            "processId": 77657, # Конструкторский отдел
+                            "customFieldData": [
+                                {
+                                    "field": {"id": 105947}, # Удалить задачу
+                                    "value": True
+                                }
+                            ]
+                        }
+                        planfix_post(f"task/{child_task.get_id()}?silent=true", body)
+                    else:
+                        body = {
+                            "processId": 77657, # Конструкторский отдел
+                            "customFieldData": [
+                                {
+                                    "field": {"id": 105967}, # Принять работу
+                                    "value": ""
+                                }
+                            ]
+                        }
+                        planfix_post(f"task/{child_task.get_id()}?silent=true", body)
+                case _:
                     body = {
-                        "customFieldData": [
-                            {
-                                "field": {"id": 105947},  # Удалить задачу
-                                "value": True
-                            }
-                        ]
-                    }
-                    planfix_post(f"task/{child_task.get_id()}?silent=true", body)
-                elif child_task.work_belongs_to_order:
-                    body = {
-                        "customFieldData": [
-                            {
-                                "field": {"id": 105947},  # Удалить задачу
-                                "value": True
-                            }
-                        ]
-                    }
-                    planfix_post(f"task/{child_task.get_id()}?silent=true", body)
-                else:
-                    body = {
-                        "customFieldData": [
-                            {
-                                "field": {"id": 105967},  # Принять работу
-                                "value": ""
-                            }
-                        ]
+                        "processId": 77657, # Конструкторский отдел
                     }
                     planfix_post(f"task/{child_task.get_id()}?silent=true", body)
 
