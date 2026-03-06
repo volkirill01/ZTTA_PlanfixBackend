@@ -732,7 +732,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
             error_message = send_assembly_to_revision(assembly_id, reported_errors, error_cause)
             return web.json_response({"code": 1, "error_message": error_message})
 
-        logging.info("all files valid, sending task %d to confirmation", assembly_id)
+        logging.info("all files valid, sending task %d to %s", assembly_id, "cutting" if create_work_tasks else "confirmation")
 
         if create_work_tasks:
             if len(unique_cutting_work) == 0:
