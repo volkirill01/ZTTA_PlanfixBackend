@@ -214,7 +214,7 @@ class Task:
         self.parent = None
         self.children = []
 
-        self.dvg_file_ids = []
+        self.work_file_ids = []
 
     def get_id(self):
         return self.task_id
@@ -587,11 +587,11 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                         has_missing_files = True
 
                 case template_id if template_id == TEMPLATE_WORK:
-                    task_data = planfix_get(f"task/{sub_task.task_id}?fields=105574,105871,105881&sourceId=0").json()["task"] # Fields: 105574 - Файлы DWG \ DXF, 105871 - Чертежи PDF, 105881 - Текущая Обработка
+                    task_data = planfix_get(f"task/{sub_task.task_id}?fields=105871,105881,106042&sourceId=0").json()["task"] # Fields: 105871 - Чертежи PDF, 105881 - Текущая Обработка, 106042 - Файлы работы
 
-                    work_files = task_data["customFieldData"][0]["value"]
-                    drawing_files = task_data["customFieldData"][1]["value"]
-                    work_type = int(task_data["customFieldData"][2]["value"]["id"])
+                    drawing_files = task_data["customFieldData"][0]["value"]
+                    work_type = int(task_data["customFieldData"][1]["value"]["id"])
+                    work_files = task_data["customFieldData"][2]["value"]
 
                     def add_work_error(message):
                         reported_errors.append(f'<a href="https://ztta.planfix.com/task/{sub_task.get_parent_id()}">{get_task_name(sub_task.get_parent_id())}</a>'
@@ -651,7 +651,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                                 has_wrong_file_names = True
                                 continue
 
-                            detail_task.dvg_file_ids.append(file_id)
+                            detail_task.work_file_ids.append(file_id)
 
                         if (work_type, thickness, material) not in unique_cutting_work:
                             unique_cutting_work[(work_type, thickness, material)] = []
@@ -765,7 +765,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                     cutting_user_group = -1
                     for detail in unique_cutting_work[(work, thickness, material)]:
                         detail_ids.append(detail.get_id())
-                        file_ids += detail.dvg_file_ids
+                        file_ids += detail.work_file_ids
                         cutting_user_group = unique_work_cuttings_user_group[work]
 
                     body = {
@@ -806,7 +806,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                                 "value": material_name_to_id[material]
                             },
                             {
-                                "field": {"id": 105574}, # Файлы DWG/DXF
+                                "field": {"id": 106042}, # Файлы работы
                                 "value": file_ids
                             }
                         ]
