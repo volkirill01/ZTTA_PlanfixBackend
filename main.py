@@ -378,6 +378,46 @@ async def field_changed_send_assembly_to_revision_(request: web.Request):
         return web.HTTPOk() # Planfix will sleep for 3 minutes if it receives error code, so always return 200
 
 
+@routes.post("/reset_order_work_field_when_all_assemblies_in_constructor_process")
+async def reset_order_work_field_when_all_assemblies_in_constructor_process(request: web.Request):
+    try:
+        body = await request.json()
+
+        order_id = int(body["order_id"])
+        sub_task_ids = list(map(int, body["sub_task_ids"]))
+
+        logging.info("\nreset_order_work_field_when_all_assemblies_in_constructor_process")
+        logging.info("order_id %d", order_id)
+        logging.info("sub_task_ids %s", sub_task_ids)
+
+        all_tasks_in_constructor_process = True
+        for sub_task_id in sub_task_ids:
+            sub_task_data = planfix_get(f"task/{sub_task_id}?fields=processId,status&sourceId=0").json()["task"]
+
+            if sub_task_data["processId"] != 77657: # Конструкторский отдел
+                all_tasks_in_constructor_process = False
+                break
+            if sub_task_data["status"]["id"] != 207 and sub_task_data["status"]["id"] != 185: # Конструкторский отдел, Согласование
+                all_tasks_in_constructor_process = False
+                break
+
+        if all_tasks_in_constructor_process:
+            body = {
+                "customFieldData": [
+                    {
+                        "field": {"id": 105971}, # Работа (Заказ/Сборка)
+                        "value": {"id":0}
+                    }
+                ]
+            }
+            planfix_post(f"task/{order_id}?silent=false", body)
+
+        return web.HTTPOk()
+    except Exception as e:
+        print_error(e)
+        return web.HTTPOk() # Planfix will sleep for 3 minutes if it receives error code, so always return 200
+
+
 @routes.post("/update_work_tasks_or_send_assembly_to_revision")
 async def update_work_tasks_or_send_assembly_to_revision(request: web.Request):
     try:
