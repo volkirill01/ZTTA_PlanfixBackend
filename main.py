@@ -339,9 +339,9 @@ class Task:
 
 
 # TODO: This is not the best solution, we should just use parent task id's with children task id's instead of all of this template, children count nonsense
-def recreate_task_tree_from_list(order_id, task_ids, template_ids, subtask_counts, cutting_needed, work_belongs_to_assembly, work_belongs_to_order, task_status_ids):
+def recreate_task_tree_from_list(root_task_id, root_task_template_id, root_task_status_id, task_ids, template_ids, subtask_counts, cutting_needed, work_belongs_to_assembly, work_belongs_to_order, task_status_ids):
     tasks = [Task(int(tid), int(tmpl_id), int(st_id)) for tid, tmpl_id, st_id in zip(task_ids, template_ids, task_status_ids)]
-    root = Task(order_id, 0, -1)
+    root = Task(root_task_id, root_task_template_id, root_task_status_id)
 
     index = 0
     sub_index = 0
@@ -638,7 +638,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
         for i in range(len(sub_task_ids)):
             _tmp.append("Нет")
             _tmp2.append(-1)
-        parent_task_tree = recreate_task_tree_from_list(assembly_id, sub_task_ids, sub_task_template_ids, sub_task_counts, sub_task_cutting_needed, _tmp, _tmp, _tmp2)
+        parent_task_tree = recreate_task_tree_from_list(assembly_id, 0, -1, sub_task_ids, sub_task_template_ids, sub_task_counts, sub_task_cutting_needed, _tmp, _tmp, _tmp2)
         parent_task_tree.print_children()
 
         task_names = {}
@@ -1006,7 +1006,7 @@ async def change_task_status_when_previous_in_wait_goes_to_complete(request: web
         _tmp = []
         for i in range(len(neighbor_ids)):
             _tmp.append("Нет")
-        parent_task_tree = recreate_task_tree_from_list(parent_id, neighbor_ids, neighbor_template_ids, neighbor_counts, _tmp, _tmp, _tmp, neighbor_task_status_ids)
+        parent_task_tree = recreate_task_tree_from_list(parent_id, 0, -1, neighbor_ids, neighbor_template_ids, neighbor_counts, _tmp, _tmp, _tmp, neighbor_task_status_ids)
         parent_task_tree.print_children()
 
         all_neighbors_complete = True
@@ -1063,7 +1063,7 @@ async def change_work_status_to_work_or_wait_for_work(request: web.Request):
         for i in range(len(sub_task_ids)):
             _tmp.append("Нет")
             _tmp2.append(-1)
-        task_tree = recreate_task_tree_from_list(assembly_id, sub_task_ids, sub_task_template_ids, subtask_counts, _tmp, _tmp, _tmp, _tmp2)
+        task_tree = recreate_task_tree_from_list(assembly_id, PLANFIX_TEMPLATE__ASSEMBLY, -1, sub_task_ids, sub_task_template_ids, subtask_counts, _tmp, _tmp, _tmp, _tmp2)
         task_tree.print_children()
 
         for task in task_tree.get_all_children():
@@ -1096,6 +1096,13 @@ async def change_work_status_to_work_or_wait_for_work(request: web.Request):
 
                         planfix_post(f"task/{work_task.task_id}?silent=false", body)
                         is_first = False
+
+                case template_id if template_id == PLANFIX_TEMPLATE__PROCESSING:
+                    if task.parent.template_id == PLANFIX_TEMPLATE__ASSEMBLY:
+                        body = {
+                            "status": {"id": STATUS__IN_QUEUE}
+                        }
+                        planfix_post(f"task/{task.task_id}?silent=false", body)
 
                 case template_id if template_id == PLANFIX_TEMPLATE__PROCESSING:
                     pass
@@ -1304,7 +1311,7 @@ async def reset_assembly_after_return_from_work(request: web.Request):
         for i in range(len(sub_task_ids)):
             _tmp.append("Нет")
             _tmp2.append(-1)
-        task_tree = recreate_task_tree_from_list(assembly_id, sub_task_ids, sub_task_template_ids, subtask_counts, _tmp, work_belongs_to_assembly, work_belongs_to_order, _tmp2)
+        task_tree = recreate_task_tree_from_list(assembly_id, 0, -1, sub_task_ids, sub_task_template_ids, subtask_counts, _tmp, work_belongs_to_assembly, work_belongs_to_order, _tmp2)
         task_tree.print_children()
 
         all_children = task_tree.get_all_children()
@@ -1330,6 +1337,7 @@ async def reset_assembly_after_return_from_work(request: web.Request):
                 case template_id if template_id == PLANFIX_TEMPLATE__PROCESSING:
                     if child_task.work_belongs_to_assembly:
                         body = {
+                            "processId": PROCESS__CONSTRUCTORS,
                             "status": {"id": STATUS__CONSTRUCTORS},
                             "customFieldData": [
                                 {
@@ -1341,6 +1349,7 @@ async def reset_assembly_after_return_from_work(request: web.Request):
                         planfix_post(f"task/{child_task.get_id()}?silent=true", body)
                     elif child_task.work_belongs_to_order:
                         body = {
+                            "processId": PROCESS__CONSTRUCTORS,
                             "status": {"id": STATUS__CONSTRUCTORS},
                             "customFieldData": [
                                 {
@@ -1358,7 +1367,6 @@ async def reset_assembly_after_return_from_work(request: web.Request):
                 case template_id if template_id == PLANFIX_TEMPLATE__PROCESSING:
                     if child_task.work_belongs_to_assembly:
                         body = {
-                            "processId": PROCESS__CONSTRUCTORS,
                             "customFieldData": [
                                 {
                                     "field": {"id": FIELD__DELETE_TASK},
@@ -1369,7 +1377,6 @@ async def reset_assembly_after_return_from_work(request: web.Request):
                         planfix_post(f"task/{child_task.get_id()}?silent=true", body)
                     elif child_task.work_belongs_to_order:
                         body = {
-                            "processId": PROCESS__CONSTRUCTORS,
                             "customFieldData": [
                                 {
                                     "field": {"id": FIELD__DELETE_TASK},
