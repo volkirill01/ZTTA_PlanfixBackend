@@ -892,7 +892,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                         "name": f"{unique_work_names[work]} {material}(Материал) {thickness}(Толщина) Работа({order_number})",
                         "status": {"id": STATUS__CUTTING},
                         "processId": PROCESS__CUTTING,
-                        "template": {"id": REST_API_TEMPLATE__PROCESSING},
+                        "template": {"id": REST_API_TEMPLATE__WORK},
                         "parent": {"id": assembly_work_task_id},
                         "customFieldData": [
                             {
