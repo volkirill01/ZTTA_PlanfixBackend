@@ -77,16 +77,22 @@ FIELD__ACCEPT_WORK = 105967  # Принять работу
 FIELD__MATERIAL_MOVEMENT = 105905  # Перемещение материалов
 FIELD__WELDING_CONFIRMATION = 105917  # Согласование (Сварки)
 FIELD__TURING_WORK_CONFIRMATION = 105919  # Согласование (Токарных работ)
+FIELD__COLORING = 106052 # Цвет покраски 2
 
 DIRECTORY__MATERIAL_SHEET = 19  # Материал (Лист)
 DIRECTORY__MATERIAL_SHEET__FIELD__NAME = 33  # Название
 
 DIRECTORY__PROCESSING_TYPE = 14  # Тип обработки
 DIRECTORY__PROCESSING_TYPE__FIELD__NAME = 28  # Название
+DIRECTORY__PROCESSING_TYPE__FIELD__CHECK_WORK_FILES = 86  # Проверять наличие файлов работы
+DIRECTORY__PROCESSING_TYPE__FIELD__CHECK_DRAWING_FILES = 88  # Проверять наличие файлов чертежей
+DIRECTORY__PROCESSING_TYPE__FIELD__CHECK_COLORING = 90  # Проверять наличие цвета покраски
 DIRECTORY__PROCESSING_TYPE__FIELD__CUTTING_PEOPLE = 59  # Раскройщик
 
-DIRECTORY__PROCESSING_TYPES_ASSEMBLY = 25  # Тип обработки (Сборка)
-DIRECTORY__PROCESSING_TYPES_ASSEMBLY__FIELD__WELDING_CONFIRMATION_NEEDED = 53  # Согласование сварки
+DIRECTORY__PROCESSING_TYPE_ASSEMBLY = 25  # Тип обработки (Сборка)
+DIRECTORY__PROCESSING_TYPE_ASSEMBLY__FIELD__WELDING_CONFIRMATION_NEEDED = 53  # Согласование сварки
+DIRECTORY__PROCESSING_TYPE_ASSEMBLY__FIELD__CHECK_DRAWING_FILES = 94  # Проверять наличие файлов чертежей
+DIRECTORY__PROCESSING_TYPE_ASSEMBLY__FIELD__CHECK_COLORING = 96  # Проверять наличие цвета покраски
 
 HTML_COLOR_ERROR = "#E74C3C"
 HTML_COLOR_ACCENT = "#CC00CC"
@@ -653,7 +659,9 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
 
         assembly_cost_calculation_files = list(map(int, body["assembly_cost_calculation_files"])) if len(str(body["assembly_cost_calculation_files"])) > 0 else []
         assembly_drawing_files = list(map(int, body["assembly_drawing_files"])) if len(str(body["assembly_drawing_files"])) > 0 else []
-        assembly_needs_welding_confirmation = list([item == "Да" for item in body["assembly_needs_welding_confirmation"]]) if len(str(body["assembly_needs_welding_confirmation"])) > 0 else []
+        assembly_needs_drawing_files_checking = list([item == "Да" for item in body["assembly_needs_drawing_files_checking"]]) if len(str(body["assembly_needs_drawing_files_checking"])) > 0 else []
+        assembly_needs_coloring_checking = list([item == "Да" for item in body["assembly_needs_coloring_checking"]]) if len(str(body["assembly_needs_coloring_checking"])) > 0 else []
+        assembly_coloring = int(body["assembly_coloring"]) if len(str(body["assembly_coloring"])) > 0 else 0
 
         logging.info("\nvalidate_files_in_assembly_and_create_work")
         logging.info("create_work_tasks %s", "true" if create_work_tasks else "false")
@@ -672,7 +680,9 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
         logging.info("----------------------------------------")
         logging.info("assembly_cost_calculation_files %s", assembly_cost_calculation_files)
         logging.info("assembly_drawing_files %s", assembly_drawing_files)
-        logging.info("assembly_needs_welding_confirmation %s", assembly_needs_welding_confirmation)
+        logging.info("assembly_needs_drawing_files_checking %s", assembly_needs_drawing_files_checking)
+        logging.info("assembly_needs_coloring_checking %s", assembly_needs_coloring_checking)
+        logging.info("assembly_coloring %d", assembly_coloring)
 
         _tmp = []
         _tmp2 = []
@@ -723,17 +733,30 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                 case template_id if template_id == PLANFIX_TEMPLATE__ASSEMBLY:
                     has_subassemblies = True
 
-                    task_data = planfix_get(f"task/{sub_task.task_id}?fields={FIELD__DRAWING_FILES},{FIELD__CUTTING_COST_CALCULATIONS_FILES},{FIELD__PROCESSING_TYPES_ASSEMBLY}&sourceId=0").json()["task"]
+                    task_data = planfix_get(f"task/{sub_task.task_id}?fields={FIELD__DRAWING_FILES},{FIELD__CUTTING_COST_CALCULATIONS_FILES},{FIELD__PROCESSING_TYPES_ASSEMBLY},{FIELD__COLORING}&sourceId=0").json()["task"]
 
                     cost_calculation_files = task_data["customFieldData"][0]["value"]
-                    assembly_work_types = task_data["customFieldData"][1]["value"]
-                    drawing_files = task_data["customFieldData"][2]["value"]
+                    coloring = task_data["customFieldData"][1]["value"]
+                    assembly_work_types = task_data["customFieldData"][2]["value"]
+                    drawing_files = task_data["customFieldData"][3]["value"]
 
-                    assembly_welding_confirmation_needed = False
+                    drawing_files_needed = False
+                    coloring_check_needed = False
                     for work_type in assembly_work_types:
-                        work_welding_confirmation_needed = planfix_get(f"directory/{DIRECTORY__PROCESSING_TYPES_ASSEMBLY}/entry/{work_type["id"]}?fields={DIRECTORY__PROCESSING_TYPES_ASSEMBLY__FIELD__WELDING_CONFIRMATION_NEEDED}").json()["entry"]["customFieldData"][0]["value"]
-                        if work_welding_confirmation_needed:
-                            assembly_welding_confirmation_needed = True
+                        work_type_data = planfix_get(f"directory/{DIRECTORY__PROCESSING_TYPE_ASSEMBLY}/entry/{work_type["id"]}?fields=" +
+                                                                       f"{DIRECTORY__PROCESSING_TYPE_ASSEMBLY__FIELD__CHECK_DRAWING_FILES}," +
+                                                                       f"{DIRECTORY__PROCESSING_TYPE_ASSEMBLY__FIELD__CHECK_COLORING}").json()["entry"]["customFieldData"]
+
+                        work_drawing_files_needed = work_type_data[0]["value"]
+                        work_coloring_check_needed = work_type_data[1]["value"]
+
+                        if work_drawing_files_needed:
+                            drawing_files_needed = True
+                        if work_coloring_check_needed:
+                            coloring_check_needed = True
+
+                        if (work_drawing_files_needed or
+                            work_coloring_check_needed):
                             break
 
                     if is_order_commercial and len(cost_calculation_files) == 0:
@@ -742,18 +765,33 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                                                f'<span style="color:{HTML_COLOR_ERROR};">Нет файлов простчёта</span>')
                         has_missing_files = True
 
-                    if assembly_welding_confirmation_needed and len(drawing_files) == 0:
+                    if drawing_files_needed and len(drawing_files) == 0:
                         reported_errors.append(f'<a href="https://ztta.planfix.com/task/{sub_task.get_id()}">{get_task_name(sub_task.get_id())}</a>' +
                                                ': ' +
                                                f'<span style="color:{HTML_COLOR_ERROR};">Нет файлов чертежей</span>')
                         has_missing_files = True
 
-                case template_id if template_id == PLANFIX_TEMPLATE__PROCESSING:
-                    task_data = planfix_get(f"task/{sub_task.task_id}?fields={FIELD__DRAWING_FILES},{FIELD__CURRENT_WORK_TYPE},{FIELD__WORK_FILES}&sourceId=0").json()["task"]
+                    if coloring_check_needed and coloring["value"] == "":
+                        reported_errors.append(f'<a href="https://ztta.planfix.com/task/{sub_task.get_id()}">{get_task_name(sub_task.get_id())}</a>' +
+                                               ': ' +
+                                               f'<span style="color:{HTML_COLOR_ERROR};">Не выбран цвет покраски</span>')
 
-                    drawing_files = task_data["customFieldData"][0]["value"]
-                    work_type = int(task_data["customFieldData"][1]["value"]["id"])
-                    work_files = task_data["customFieldData"][2]["value"]
+                case template_id if template_id == PLANFIX_TEMPLATE__PROCESSING:
+                    task_data = planfix_get(f"task/{sub_task.task_id}?fields={FIELD__DRAWING_FILES},{FIELD__CURRENT_WORK_TYPE},{FIELD__WORK_FILES},{FIELD__COLORING}&sourceId=0").json()["task"]
+
+                    coloring = task_data["customFieldData"][0]["value"]
+                    drawing_files = task_data["customFieldData"][1]["value"]
+                    work_type = int(task_data["customFieldData"][2]["value"]["id"])
+                    work_files = task_data["customFieldData"][3]["value"]
+
+                    work_type_data = planfix_get(f"directory/{DIRECTORY__PROCESSING_TYPE}/entry/{work_type}?fields=" +
+                                                 f"{DIRECTORY__PROCESSING_TYPE__FIELD__CHECK_WORK_FILES}," +
+                                                 f"{DIRECTORY__PROCESSING_TYPE__FIELD__CHECK_DRAWING_FILES}," +
+                                                 f"{DIRECTORY__PROCESSING_TYPE__FIELD__CHECK_COLORING}").json()["entry"]["customFieldData"]
+
+                    work_files_check_needed = work_type_data[0]["value"]
+                    drawing_files_check_needed = work_type_data[1]["value"]
+                    coloring_check_needed = work_type_data[2]["value"]
 
                     def add_work_error(message):
                         reported_errors.append(f'<a href="https://ztta.planfix.com/task/{sub_task.get_parent_id()}">{get_task_name(sub_task.get_parent_id())}</a>'
@@ -763,15 +801,17 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                                                f'<span style="color:{HTML_COLOR_ERROR};">{message}</span>')
 
                     work_files_is_missing = False
-                    if sub_task.cutting_needed:
-                        if len(work_files) == 0:
-                            add_work_error("Нет файлов работы")
-                            has_missing_files = True
-                            work_files_is_missing = True
+                    if work_files_check_needed and len(work_files) == 0:
+                        add_work_error("Нет файлов работы")
+                        has_missing_files = True
+                        work_files_is_missing = True
 
-                    if len(drawing_files) == 0:
+                    if drawing_files_check_needed and len(drawing_files) == 0:
                         add_work_error("Нет файлов чертежей")
                         has_missing_files = True
+
+                    if coloring_check_needed and coloring["value"] == "":
+                        add_work_error("Не выбран цвет покраски")
 
                     detail_task = sub_task.parent
                     if sub_task.cutting_needed and not work_files_is_missing:
@@ -825,12 +865,15 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                                        ': ' +
                                        f'<span style="color:{HTML_COLOR_ERROR};">Нет файлов простчёта</span>')
                 has_missing_files = True
-        if True in assembly_needs_welding_confirmation:
-            if len(assembly_drawing_files) == 0:
-                reported_errors.append(f'<a href="https://ztta.planfix.com/task/{assembly_id}">{get_task_name(assembly_id)}</a>' +
-                                       ': ' +
-                                       f'<span style="color:{HTML_COLOR_ERROR};">Нет файлов чертежей</span>')
-                has_missing_files = True
+        if True in assembly_needs_drawing_files_checking and len(assembly_drawing_files) == 0:
+            reported_errors.append(f'<a href="https://ztta.planfix.com/task/{assembly_id}">{get_task_name(assembly_id)}</a>' +
+                                   ': ' +
+                                   f'<span style="color:{HTML_COLOR_ERROR};">Нет файлов чертежей</span>')
+            has_missing_files = True
+        if True in assembly_needs_coloring_checking and assembly_coloring == 0:
+            reported_errors.append(f'<a href="https://ztta.planfix.com/task/{assembly_id}">{get_task_name(assembly_id)}</a>' +
+                                   ': ' +
+                                   f'<span style="color:{HTML_COLOR_ERROR};">Не выбран цвет покраски</span>')
 
         if len(reported_errors) != 0:
             error_causes = []
@@ -847,8 +890,10 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                 error_cause += cause
                 if i < len(error_causes) - 1:
                     error_cause += " и "
+            if len(error_causes) > 0:
+                error_cause += " "
 
-            error_cause += ' Подробнее смотреть "Комментарий для доработки"'
+            error_cause += 'Подробнее смотреть "Комментарий для доработки"'
 
             error_message = send_assembly_to_revision(assembly_id, reported_errors, error_cause)
             return web.json_response({"code": 1, "error_message": error_message})
