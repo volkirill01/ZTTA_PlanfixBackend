@@ -388,6 +388,43 @@ def recreate_task_tree_from_list(root_task_id, root_task_template_id, root_task_
     return root
 
 
+@routes.post("/complete_order_from_assembly")
+async def complete_order_from_assembly(request: web.Request):
+    try:
+        body = await request.json()
+
+        assembly_id = int(body["assembly_id"])
+        order_id = int(body["order_id"])
+        order_subtask_ids = list(map(int, body["order_subtask_ids"]))
+
+        logging.info("\ncomplete_order_from_assembly")
+        logging.info("assembly_id %d", assembly_id)
+        logging.info("order_id %d", order_id)
+        logging.info("order_subtask_ids %s", order_subtask_ids)
+
+        for subtask_id in order_subtask_ids:
+            subtask_data = planfix_get(f"task/{subtask_id}?fields=processId,parent&sourceId=0").json()["task"]
+
+            subtask_parent_id = int(subtask_data["parent"]["id"])
+            if subtask_parent_id != order_id:
+                continue
+
+            subtask_process_id = int(subtask_data["processId"])
+            if subtask_process_id != PROCESS__WAREHOUSING:
+                return PlanfixOk()
+
+        body = {
+            "status": {"id": STATUS__READY},
+            "processId": PROCESS__WAREHOUSING
+        }
+        planfix_post(f"task/{order_id}?silent=false", body)
+
+        return PlanfixOk()
+    except Exception as e:
+        print_error(e)
+        return PlanfixError()
+
+
 def assembly_needs_revision(assembly_process_id, assembly_status_id):
     match assembly_process_id:
         case process_id if process_id == PROCESS__PRODUCTION:
