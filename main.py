@@ -17,86 +17,88 @@ from structs import *
 import logging
 
 
-USER_GROUP__WELDING_CONFIRMATION = 47145 # Одобряют (Сварку)
-USER_GROUP__TURING_WORK_CONFIRMATION = 47147 # Одобряют (Токарные работы)
+USER_GROUP__WELDING_CONFIRMATION = 47145  # Одобряют (Сварку)
+USER_GROUP__TURING_WORK_CONFIRMATION = 47147  # Одобряют (Токарные работы)
 
-PROCESS__CONSTRUCTORS = 77657 # Конструкторский отдел
-PROCESS__CUTTING = 77665 # Вывод У.П.
-PROCESS__PRODUCTION = 77663 # Производство
-PROCESS__WAREHOUSING = 77659 # Складское хозяйство
+PROCESS__CONSTRUCTORS = 77657  # Конструкторский отдел
+PROCESS__CUTTING = 77665  # Вывод У.П.
+PROCESS__PRODUCTION = 77663  # Производство
+PROCESS__WAREHOUSING = 77659  # Складское хозяйство
 
-STATUS__IN_WORK = 2 # В работе
-STATUS__CONSTRUCTORS = 207 # Конструкторский отдел
-STATUS__IN_QUEUE = 237 # В очереди
-STATUS__CUTTING = 186 # Вывод У.П.
-STATUS__CONFIRMATION = 185 # Согласование
-STATUS__MOVEMENT_BETWEEN_DEPARTMENTS = 217 # Перемещение между подразделениями
-STATUS__ACCEPT_WORK = 228 # Принять работу
-STATUS__MATERIAL_EXISTENCE_CHECKING = 224 # Проверка наличия материалов
-STATUS__MATERIAL_EXISTENCE_CONFIRMATION = 221 # Подтверждение наличия материалов
-STATUS__MATERIAL_MOVEMENT = 220 # Перемещение материалов
-STATUS__COMPLETE = 3 # Завершённая
-STATUS__READY = 189 # Готово
+STATUS__IN_WORK = 2  # В работе
+STATUS__CONSTRUCTORS = 207  # Конструкторский отдел
+STATUS__IN_QUEUE = 237  # В очереди
+STATUS__CUTTING = 186  # Вывод У.П.
+STATUS__CONFIRMATION = 185  # Согласование
+STATUS__MOVEMENT_BETWEEN_DEPARTMENTS = 217  # Перемещение между подразделениями
+STATUS__ACCEPT_WORK = 228  # Принять работу
+STATUS__MATERIAL_EXISTENCE_CHECKING = 224  # Проверка наличия материалов
+STATUS__MATERIAL_EXISTENCE_CONFIRMATION = 221  # Подтверждение наличия материалов
+STATUS__MATERIAL_MOVEMENT = 220  # Перемещение материалов
+STATUS__COMPLETE = 3  # Завершённая
+STATUS__READY = 189  # Готово
 
 # Sending template id from Planfix sends this values
-PLANFIX_TEMPLATE__ASSEMBLY = 8732191 # Сборка
-PLANFIX_TEMPLATE__DETAIL = 8732005 # Деталь
-PLANFIX_TEMPLATE__PROCESSING = 8732007 # Обработка
+PLANFIX_TEMPLATE__ASSEMBLY = 8732191  # Сборка
+PLANFIX_TEMPLATE__DETAIL = 8732005  # Деталь
+PLANFIX_TEMPLATE__PROCESSING = 8732007  # Обработка
 # Getting template id via Planfix rest API gives this values, and this values should be used to send template id to Planfix rest API
-REST_API_TEMPLATE__ASSEMBLY = 14602 # Сборка
-REST_API_TEMPLATE__DETAIL = 14509 # Деталь
-REST_API_TEMPLATE__PROCESSING = 14510 # Обработка
-REST_API_TEMPLATE__WORK = 15155 # Работа
+REST_API_TEMPLATE__ASSEMBLY = 14602  # Сборка
+REST_API_TEMPLATE__DETAIL = 14509  # Деталь
+REST_API_TEMPLATE__PROCESSING = 14510  # Обработка
+REST_API_TEMPLATE__WORK = 15155  # Работа
 
-FIELD__REVISION_CAUSE = 105921 # Причина возврата на доработку
-FIELD__REVISION_COMMENT = 105802 # Комментарий для доработки
-FIELD__RETURNED_TO_REVISION = 105953 # Возвращено на доработку
-FIELD__CURRENT_WORK_TYPE = 105881 # Текущая Обработка
-FIELD__CURRENT_WORK_TYPE_ASSEMBLY = 105931 # Текущая Обработка (Сборка)
-FIELD__WORK_FOR_ASSEMBLY = 105945 # Работа для сборки [Костыль]
-FIELD__WORK_FOR_ORDER = 105949 # Работа для заказа [Костыль]
-FIELD__DELETE_TASK = 105947 # Удалить задачу
-FIELD__FILES_ARE_CHECKED = 106034 # Файлы проверены
-FIELD__CUTTING_NEEDED = 106040 # Нужно создавать раскрои
-FIELD__WORK_ORDER_OR_ASSEMBLY = 105971 # Работа (Заказ/Сборка)
-FIELD__ORDER = 105873 # Заказ
-FIELD__ORDER_TYPE_COMMERCIAL = 105869 # Тип заказа (Коммерческий)
-FIELD__ORDER_TYPE_INNER = 105885 # Тип заказа (Внутренний)
-FIELD__ORDER_NUMBER = 105596 # Номер заказа
-FIELD__WORK_FILES = 106042 # Файлы работы
-FIELD__DRAWING_FILES = 105871 # Чертежи PDF
-FIELD__CUTTING_COST_CALCULATIONS_FILES = 105925 # Просчёт (PDF)
-FIELD__PROCESSING_TYPES = 105879 # Типы обработки
-FIELD__PROCESSING_TYPES_ASSEMBLY = 105929 # Типы обработки (Сборка)
-FIELD__MATERIAL = 105889 # Материал
-FIELD__THICKNESS = 105858 # Толщина
-FIELD__UNUSED_DETAILS = 106026 # Неиспользованные детали
-FIELD__DETAILS = 105939 # Детали
-FIELD__ASSEMBLY = 106028 # Сборка
-FIELD__ACCEPT_WORK = 105967 # Принять работу
-FIELD__MATERIAL_MOVEMENT = 105905 # Перемещение материалов
-FIELD__WELDING_CONFIRMATION = 105917 # Согласование (Сварки)
-FIELD__TURING_WORK_CONFIRMATION = 105919 # Согласование (Токарных работ)
+FIELD__REVISION_CAUSE = 105921  # Причина возврата на доработку
+FIELD__REVISION_COMMENT = 105802  # Комментарий для доработки
+FIELD__RETURNED_TO_REVISION = 105953  # Возвращено на доработку
+FIELD__CURRENT_WORK_TYPE = 105881  # Текущая Обработка
+FIELD__CURRENT_WORK_TYPE_ASSEMBLY = 105931  # Текущая Обработка (Сборка)
+FIELD__WORK_FOR_ASSEMBLY = 105945  # Работа для сборки [Костыль]
+FIELD__WORK_FOR_ORDER = 105949  # Работа для заказа [Костыль]
+FIELD__DELETE_TASK = 105947  # Удалить задачу
+FIELD__FILES_ARE_CHECKED = 106034  # Файлы проверены
+FIELD__CUTTING_NEEDED = 106040  # Нужно создавать раскрои
+FIELD__WORK_ORDER_OR_ASSEMBLY = 105971  # Работа (Заказ/Сборка)
+FIELD__ORDER = 105873  # Заказ
+FIELD__ORDER_TYPE_COMMERCIAL = 105869  # Тип заказа (Коммерческий)
+FIELD__ORDER_TYPE_INNER = 105885  # Тип заказа (Внутренний)
+FIELD__ORDER_NUMBER = 105596  # Номер заказа
+FIELD__WORK_FILES = 106042  # Файлы работы
+FIELD__DRAWING_FILES = 105871  # Чертежи PDF
+FIELD__CUTTING_COST_CALCULATIONS_FILES = 105925  # Просчёт (PDF)
+FIELD__PROCESSING_TYPES = 105879  # Типы обработки
+FIELD__PROCESSING_TYPES_ASSEMBLY = 105929  # Типы обработки (Сборка)
+FIELD__MATERIAL = 105889  # Материал
+FIELD__THICKNESS = 105858  # Толщина
+FIELD__UNUSED_DETAILS = 106026  # Неиспользованные детали
+FIELD__DETAILS = 105939  # Детали
+FIELD__ASSEMBLY = 106028  # Сборка
+FIELD__ACCEPT_WORK = 105967  # Принять работу
+FIELD__MATERIAL_MOVEMENT = 105905  # Перемещение материалов
+FIELD__WELDING_CONFIRMATION = 105917  # Согласование (Сварки)
+FIELD__TURING_WORK_CONFIRMATION = 105919  # Согласование (Токарных работ)
 
-DIRECTORY__MATERIAL_SHEET = 19 # Материал (Лист)
-DIRECTORY__MATERIAL_SHEET__FIELD__NAME = 33 # Название
+DIRECTORY__MATERIAL_SHEET = 19  # Материал (Лист)
+DIRECTORY__MATERIAL_SHEET__FIELD__NAME = 33  # Название
 
-DIRECTORY__PROCESSING_TYPE = 14 # Тип обработки
-DIRECTORY__PROCESSING_TYPE__FIELD__NAME = 28 # Название
-DIRECTORY__PROCESSING_TYPE__FIELD__CUTTING_PEOPLE = 59 # Раскройщик
+DIRECTORY__PROCESSING_TYPE = 14  # Тип обработки
+DIRECTORY__PROCESSING_TYPE__FIELD__NAME = 28  # Название
+DIRECTORY__PROCESSING_TYPE__FIELD__CUTTING_PEOPLE = 59  # Раскройщик
 
-DIRECTORY__PROCESSING_TYPES_ASSEMBLY = 25 # Тип обработки (Сборка)
-DIRECTORY__PROCESSING_TYPES_ASSEMBLY__FIELD__WELDING_CONFIRMATION_NEEDED = 53 # Согласование сварки
-
+DIRECTORY__PROCESSING_TYPES_ASSEMBLY = 25  # Тип обработки (Сборка)
+DIRECTORY__PROCESSING_TYPES_ASSEMBLY__FIELD__WELDING_CONFIRMATION_NEEDED = 53  # Согласование сварки
 
 HTML_COLOR_ERROR = "#E74C3C"
 HTML_COLOR_ACCENT = "#CC00CC"
 
+
 class PlanfixOk(web.HTTPOk):
     status_code = 200
 
-class PlanfixError(web.HTTPOk): # Planfix will sleep for 3 minutes if it receives error code, so always return success
+
+class PlanfixError(web.HTTPOk):  # Planfix will sleep for 3 minutes if it receives error code, so always return success
     status_code = 200
+
 
 HOST = os.getenv('HOST', '0.0.0.0')
 PORT = int(os.getenv('PORT', 10210))
@@ -298,6 +300,7 @@ class Task:
 
     def get_id(self):
         return self.task_id
+
     def get_parent_id(self):
         if self.parent:
             return self.parent.get_id()
@@ -306,8 +309,10 @@ class Task:
 
     def is_assembly_task(self):
         return self.template_id == PLANFIX_TEMPLATE__ASSEMBLY
+
     def is_detail_task(self):
         return self.template_id == PLANFIX_TEMPLATE__DETAIL
+
     def is_work_task(self):
         return self.template_id == PLANFIX_TEMPLATE__PROCESSING
 
@@ -411,7 +416,6 @@ def field_changed_send_assembly_to_revision(field_name, current_user, current_ti
         revision_cause_task_parent_name = planfix_get(f"task/{revision_cause_task_parent_id}?fields=name&sourceId=0").json()["task"]["name"]
         revision_cause_task_template_id = revision_cause_task_data["template"]["id"]
 
-
         cause_task_path = ''
         match revision_cause_task_template_id:
             case template_id if template_id == REST_API_TEMPLATE__PROCESSING:
@@ -486,7 +490,7 @@ async def reset_order_work_field_when_all_assemblies_in_constructor_process(requ
                 "customFieldData": [
                     {
                         "field": {"id": FIELD__WORK_ORDER_OR_ASSEMBLY},
-                        "value": {"id":0}
+                        "value": {"id": 0}
                     }
                 ]
             }
@@ -621,7 +625,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
         logging.info("order_id %d", order_id)
         logging.info("order_name %s", order_name)
         logging.info("order_number %s", order_number)
-        logging.info("is_order_commercial %s",  "true" if is_order_commercial else "false")
+        logging.info("is_order_commercial %s", "true" if is_order_commercial else "false")
         logging.info("order_work_task_id %d", order_work_task_id)
         logging.info("----------------------------------------")
         logging.info("sub_task_ids %s", sub_task_ids)
@@ -642,6 +646,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
         parent_task_tree.print_children()
 
         task_names = {}
+
         def get_task_name(task_id):
             if task_id in task_names:
                 return task_names[task_id]
@@ -719,7 +724,6 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                                                f'<a href="https://ztta.planfix.com/task/{sub_task.get_id()}">{get_task_name(sub_task.get_id())}</a>' +
                                                ': ' +
                                                f'<span style="color:{HTML_COLOR_ERROR};">{message}</span>')
-
 
                     work_files_is_missing = False
                     if sub_task.cutting_needed:
@@ -822,7 +826,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                     }
                 }
                 planfix_post(f"task/{assembly_id}?silent=false", body)
-            else: # We have work to do
+            else:  # We have work to do
                 if order_work_task_id == 0:
                     body = {
                         "name": f"{order_name} Работа({order_number})",
@@ -975,7 +979,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
         return web.json_response({"code": 0})
     except Exception as e:
         print_error(e)
-        return web.json_response({"code": 1, "error_message": e}) # Planfix will sleep for 3 minutes if it receives error code, so always return success
+        return web.json_response({"code": 1, "error_message": e})  # Planfix will sleep for 3 minutes if it receives error code, so always return success
 
 
 # When one task goes to status "Завершённая", moves next task in status "В очереди" to status passed by parameter "status_id"
@@ -1838,7 +1842,6 @@ async def add_confirmation_people(request: web.Request):
 
         update_task = False
 
-
         welding = confirmation_needed["welding"]
         for work in welding:
             if work == "Да":
@@ -1853,7 +1856,6 @@ async def add_confirmation_people(request: web.Request):
                 )
                 update_task = True
                 break
-
 
         turning_work = confirmation_needed["turning_work"][0].split(",") if len(confirmation_needed["turning_work"]) != 0 else []
         for work in turning_work:
