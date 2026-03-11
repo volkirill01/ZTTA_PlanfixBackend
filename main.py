@@ -903,9 +903,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
         if create_work_tasks:
             if len(unique_cutting_work) == 0:
                 body = {
-                    "status": {
-                        "id": STATUS__IN_WORK
-                    }
+                    "status": {"id": STATUS__IN_WORK}
                 }
                 planfix_post(f"task/{assembly_id}?silent=false", body)
             else:  # We have work to do
