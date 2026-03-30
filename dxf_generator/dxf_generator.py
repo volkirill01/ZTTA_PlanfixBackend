@@ -1,9 +1,19 @@
+import os
 import logging
 import time
 import ezdxf
 from ezdxf.addons.drawing import matplotlib
+from ezdxf.fonts import fonts
 
 from structs import *
+
+try:
+    cache_dir = os.path.expanduser("~/.cache/ezdxf")
+    os.makedirs(cache_dir, exist_ok=True)
+    fonts.build_system_font_cache()
+    logging.info("ezdxf font cache rebuilt successfully")
+except Exception as e:
+    logging.warning(f"Font cache warning: {e}")
 
 class DXFGenerator:
     class PartType:
