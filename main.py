@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 from time import sleep
 
 import aiohttp
@@ -69,6 +70,7 @@ FIELD__CUTTING_COST_CALCULATIONS_FILES = 105925  # Просчёт (PDF)
 FIELD__PROCESSING_TYPES = 105879  # Типы обработки
 FIELD__PROCESSING_TYPES_ASSEMBLY = 105929  # Типы обработки (Сборка)
 FIELD__MATERIAL = 105889  # Материал
+FIELD__GROUP = 106056  # Группа
 FIELD__THICKNESS = 105858  # Толщина
 FIELD__UNUSED_DETAILS = 106026  # Неиспользованные детали
 FIELD__DETAILS = 105939  # Детали
@@ -96,6 +98,9 @@ DIRECTORY__PROCESSING_TYPE_ASSEMBLY__FIELD__CHECK_COLORING = 96  # Провер�
 
 HTML_COLOR_ERROR = "#E74C3C"
 HTML_COLOR_ACCENT = "#CC00CC"
+
+
+test_filename_parsing = False
 
 
 class PlanfixOk(web.HTTPOk):
@@ -160,7 +165,7 @@ def send_assembly_to_revision(assembly_id, reported_errors, revision_cause):
         ]
     }
     planfix_post(f"task/{assembly_id}?silent=false", body)
-    logging.info(f"Errors found in assembly:\n{error_message}")
+    log_error(f"Errors found in assembly:\n{error_message}")
     return error_message
 
 
@@ -201,94 +206,131 @@ def get_user_group_id_from_name(group_name: str):
 
 
 def filename_format_to_ru(filename_format: str):
-    filename_format = filename_format.replace("order_number", "Номер заказа")
-    filename_format = filename_format.replace("assembly_id", "Номер/Название сборки")
     filename_format = filename_format.replace("detail_id", "Номер/Название детали")
-    filename_format = filename_format.replace("material", "Материал")
-    filename_format = filename_format.replace("thickness", "Толщина")
-    filename_format = filename_format.replace("quantity", "Количество")
+    filename_format = filename_format.replace("group", "Група(Опционально)")
+    filename_format = filename_format.replace("material", "Материал(Для dwg/dxf)")
+    filename_format = filename_format.replace("thickness", "Толщина(Для dwg/dxf)")
     filename_format = filename_format.replace(".extension", "")
 
     return filename_format
 
 
-# material_table = {
-#     "МС",
-#     "СС",
-#     "АС",
-#     "Нерж",
-#     "СТ3"
-# }
+filename_format = "{detail_id}_{group}_{material}_{thickness}.extension"
 
-# filename_format = "{order_number}_{assembly_id}_{detail_id}_{material}_{thickness}_{quantity}.extension"
-filename_format = "{detail_id}_{material}_{thickness}.extension"
+def parse_filename(filename: str, material_name_to_id: dict[str, int]):
+    file_span = filename[0: filename.rfind(".")]
+    file_extension = filename[filename.rfind(".") + 1:].lower()
+    components = file_span.split("_")
+    parsed_component_count = 0
 
+    detail_id = components[parsed_component_count]
+    parsed_component_count += 1
 
-# Развертка - балка б шаблон лево_СТ3_Т1_1шт итфыв.DWG
-def parse_filename(filename: str):
-    filespan = filename[0: filename.rfind(".")]
-    components = filespan.split("_")
+    def error_result(message: str, show_correct_format: bool):
+        return {"error": f"Ошибка в названии файла: \"{filename}\". {message}.{f' Корректный формат: \"{filename_format_to_ru(filename_format)}\".' if show_correct_format else ''}"}
 
-    if len(components) < 3:
-        # if len(components) < 6:
-        print_error(f"Filename \"{filename}\" incorrectly formatted. Format is \"{filename_format}\"")
-        return {"error": f"Неверный формат названия файла: \"{filename}\". Корректный формат: \"{filename_format_to_ru(filename_format)}\""}
+    def try_parse_material(_parsed_component_count):
+        if components[_parsed_component_count] in material_name_to_id:
+            _material = components[_parsed_component_count]
+            _parsed_component_count += 1
 
-    # try:
-    #     order_number = int(components[0])
-    # except Exception as e:
-    #     print_error(f"{components[0]} Incorrect format for OrderNumber. Error is: {e}")
-    #     return {"error": f"(Номер заказа) Неверный формат: {components[0]}"}
+            if _parsed_component_count >= len(components):
+                return error_result("Материал указан без толщины", True)
 
-    # try:
-    #     assembly_id = int(components[1])
-    # except Exception as e:
-    #     print_error(f"{components[1]} Incorrect format for AssemblyID. Error is: {e}")
-    #     return {"error": f"(Номер сборки) Неверный формат: {components[1]}"}
+            _thickness = components[_parsed_component_count]
+            _parsed_component_count += 1
 
-    # try:
-    #     detail_id = int(components[2])
-    # except Exception as e:
-    #     print_error(f"{components[2]} Incorrect format for DetailID. Error is: {e}")
-    #     return {"error": f"(Номер детали) Неверный формат: {components[2]}"}
-    detail_id = components[0]
+            try:
+                if _thickness.startswith("Т"):  # Cirilic
+                    _thickness = _thickness[1:]
+                if _thickness.startswith("T"):  # Latin
+                    _thickness = _thickness[1:]
 
-    # material = components[3]
-    material = components[1]
-    # if material not in material_table:
-    #     print_error(f"{material} Unknown material")
-    #     return {"error": f"(Материал) Неизвестный Материал: {material}"}
+                _thickness = int(_thickness)
 
-    # try:
-    #     thickness = int(components[4])
-    # except Exception as e:
-    #     print_error(f"{components[4]} Incorrect format for Thickness. Error is: {e}")
-    #     return {"error": f"(Толщина) Неверный формат: {components[4]}"}
-    try:
-        thickness = components[2]
-        if thickness.startswith("Т"):
-            thickness = thickness[1:]
+                return {"material": _material, "thickness": _thickness, "parsed_component_count": _parsed_component_count}
+            except ValueError:
+                return error_result(f"Неверный формат толщины: \"{components[_parsed_component_count - 1]}\" ожидалось целое число с или без приставки 'Т'", False)
+        else:
+            _thickness = components[_parsed_component_count]
+            _parsed_component_count += 1
 
-        thickness = int(thickness)
-    except Exception as e:
-        print_error(f"{components[2]} Incorrect format for Thickness. Error is: {e}")
-        return {"error": f"(Толщина) Неверный формат: {components[2]}"}
+            try:
+                if _thickness.startswith("Т"):  # Cirilic
+                    _thickness = _thickness[1:]
+                if _thickness.startswith("T"):  # Latin
+                    _thickness = _thickness[1:]
 
-    # try:
-    #     quantity = int(components[5])
-    # except Exception as e:
-    #     print_error(f"{components[5]} Incorrect format for Quantity. Error is: {e}")
-    #     return {"error": f"(Количество) Неверный формат: {components[5]}"}
+                _thickness = int(_thickness)
+
+                return error_result(f"Неизвестный материал: \"{components[_parsed_component_count - 2]}\"", False)
+            except ValueError:
+                return None
+
+    group = None
+    material = None
+    thickness = None
+
+    while parsed_component_count < len(components):
+        if file_extension == "dwg" or file_extension == "dxf":
+            material_result = try_parse_material(parsed_component_count)
+            if material_result is None:
+                group = components[parsed_component_count]
+                parsed_component_count += 1
+            else:
+                if "error" in material_result:
+                    return material_result
+
+                material = material_result["material"]
+                if "thickness" in material_result:
+                    thickness = material_result["thickness"]
+
+                parsed_component_count = material_result["parsed_component_count"]
+        else:
+            group = components[parsed_component_count]
+            parsed_component_count += 1
+            break
+    if file_extension == "dwg" or file_extension == "dxf":
+        if material is None or thickness is None:
+            return error_result(f"Не указаны материал и толщина (dwg, dxf файлы обязаны иметь их в названии файла)", True)
 
     return {
-        # "order_number": order_number,
-        # "assembly_id": assembly_id,
         "detail_id": detail_id,
+        "group": group,
         "material": material,
-        "thickness": thickness  # ,
-        # "quantity": quantity
+        "thickness": thickness
     }
 
+if test_filename_parsing:
+    test_filenames = [
+        "Труба Какая нибудь_L.igs", # Good
+        "Труба Какая нибудь_T.pdf", # Good
+        "Труба Какая нибудь.IGS",   # Good
+
+        "Лист Какой нибудь_СТ3_2.dwg",        # Good
+        "Лист Какой нибудь_СТ3_5.dxf",        # Good
+        "Лист Какой нибудь_СТ3_T5.dxf",       # Good
+        "Лист Какой нибудь_СТ3_Т5.dxf",       # Good
+        "Лист Какой нибудь_Group1_СТ3_5.dxf", # Good
+        "Лист Какой нибудь_Group1.dxf",       # Good
+        "Лист Какой нибудь_СТ991_5.dxf",      # Bad
+        "Лист Какой нибудь_СТ3.DXF",          # Bad
+        "Лист Какой нибудь_СТ3_АА.DXF",       # Bad
+        "Лист Какой нибудь_СТ3_ТАА.DXF",      # Bad
+        "Лист Какой нибудь.DWG",              # Bad
+    ]
+
+    material_directory = planfix_post(f"directory/{DIRECTORY__MATERIAL_SHEET}/entry/list", {"offset": 0, "pageSize": 100, "fields": f"key,{DIRECTORY__MATERIAL_SHEET__FIELD__NAME}", "groupsOnly": False}).json()["directoryEntries"]
+    material_name_to_id = {}
+    for material_entry in material_directory:
+        material_name = str(material_entry["customFieldData"][0]["value"]).upper()
+        material_name_to_id[material_name] = int(material_entry["key"])
+
+    for filename in test_filenames:
+        parsed_filename = parse_filename(filename, material_name_to_id)
+        print(parsed_filename)
+
+    exit(0)
 
 class Task:
     def __init__(self, task_id: int, template_id: int, status_id: int):
@@ -339,8 +381,7 @@ class Task:
         return result
 
     def print_children(self, level: int = 0):
-        logging.info(
-            f"{'  ' * level}{self.task_id}[{self.template_id}]({self.status_id}){' cutting' if self.cutting_needed else ''}{' assembly_work' if self.work_belongs_to_assembly else ''}{' order_work' if self.work_belongs_to_order else ''}")  # planfix_get(f"task/{self._id}?fields=name&sourceId=0").json()["task"]["name"]
+        log_info(f"{'  ' * level}{self.task_id}[{self.template_id}]({self.status_id}){' cutting' if self.cutting_needed else ''}{' assembly_work' if self.work_belongs_to_assembly else ''}{' order_work' if self.work_belongs_to_order else ''}")  # planfix_get(f"task/{self._id}?fields=name&sourceId=0").json()["task"]["name"]
         level += 1
         for child in self.children:
             child.print_children(level)
@@ -394,6 +435,11 @@ def recreate_task_tree_from_list(root_task_id, root_task_template_id, root_task_
     return root
 
 
+@routes.get("/hello")
+async def hello(request: web.Request):
+    return web.json_response("hello")
+
+
 @routes.post("/complete_order_from_assembly")
 async def complete_order_from_assembly(request: web.Request):
     try:
@@ -403,10 +449,10 @@ async def complete_order_from_assembly(request: web.Request):
         order_id = int(body["order_id"])
         order_subtask_ids = list(map(int, body["order_subtask_ids"]))
 
-        logging.info("\ncomplete_order_from_assembly")
-        logging.info("assembly_id %d", assembly_id)
-        logging.info("order_id %d", order_id)
-        logging.info("order_subtask_ids %s", order_subtask_ids)
+        log_info("\ncomplete_order_from_assembly")
+        log_info("assembly_id %d", assembly_id)
+        log_info("order_id %d", order_id)
+        log_info("order_subtask_ids %s", order_subtask_ids)
 
         for subtask_id in order_subtask_ids:
             subtask_data = planfix_get(f"task/{subtask_id}?fields=processId,parent&sourceId=0").json()["task"]
@@ -445,7 +491,7 @@ def assembly_needs_revision(assembly_process_id, assembly_status_id):
 
 def field_changed_send_assembly_to_revision(field_name, current_user, current_time, revision_cause_task_id):
     assembly_id = get_parent_main_assembly(revision_cause_task_id)
-    logging.info("assembly_id: %d", assembly_id)
+    log_info("assembly_id: %d", assembly_id)
     if assembly_id == -1:
         assembly_id = revision_cause_task_id
 
@@ -492,11 +538,11 @@ async def field_changed_send_assembly_to_revision_(request: web.Request):
         current_time = body["current_time"]
         field_name = body["field_name"]
 
-        logging.info("\nfield_changed_send_assembly_to_revision")
-        logging.info("task_id %d", task_id)
-        logging.info("current_user %s", current_user)
-        logging.info("current_time %s", current_time)
-        logging.info("field_name %s", field_name)
+        log_info("\nfield_changed_send_assembly_to_revision")
+        log_info("task_id %d", task_id)
+        log_info("current_user %s", current_user)
+        log_info("current_time %s", current_time)
+        log_info("field_name %s", field_name)
 
         field_changed_send_assembly_to_revision(field_name, current_user, current_time, task_id)
         return PlanfixOk()
@@ -513,9 +559,9 @@ async def reset_order_work_field_when_all_assemblies_in_constructor_process(requ
         order_id = int(body["order_id"])
         sub_task_ids = list(map(int, body["sub_task_ids"]))
 
-        logging.info("\nreset_order_work_field_when_all_assemblies_in_constructor_process")
-        logging.info("order_id %d", order_id)
-        logging.info("sub_task_ids %s", sub_task_ids)
+        log_info("\nreset_order_work_field_when_all_assemblies_in_constructor_process")
+        log_info("order_id %d", order_id)
+        log_info("sub_task_ids %s", sub_task_ids)
 
         all_tasks_in_constructor_process = True
         for sub_task_id in sub_task_ids:
@@ -558,14 +604,14 @@ async def update_work_tasks_or_send_assembly_to_revision(request: web.Request):
         sub_task_work_type_names = body["sub_task_work_type_names"]
         sub_task_work_ids = list(map(int, body["sub_task_work_ids"]))
 
-        logging.info("\nupdate_work_tasks_or_send_assembly_to_revision")
-        logging.info("detail_id %d", detail_id)
-        logging.info("order_id %d", order_id)
-        logging.info("work_type_ids %s", work_type_ids)
-        logging.info("work_type_names %s", work_type_names)
-        logging.info("sub_task_work_type_ids %s", sub_task_work_type_ids)
-        logging.info("sub_task_work_type_names %s", sub_task_work_type_names)
-        logging.info("sub_task_work_ids %s", sub_task_work_ids)
+        log_info("\nupdate_work_tasks_or_send_assembly_to_revision")
+        log_info("detail_id %d", detail_id)
+        log_info("order_id %d", order_id)
+        log_info("work_type_ids %s", work_type_ids)
+        log_info("work_type_names %s", work_type_names)
+        log_info("sub_task_work_type_ids %s", sub_task_work_type_ids)
+        log_info("sub_task_work_type_names %s", sub_task_work_type_names)
+        log_info("sub_task_work_ids %s", sub_task_work_ids)
 
         old_dict = dict(zip(sub_task_work_type_ids, sub_task_work_type_names))
         new_ids_set = set(work_type_ids)
@@ -580,8 +626,8 @@ async def update_work_tasks_or_send_assembly_to_revision(request: web.Request):
             for id_ in work_type_ids
             if id_ not in old_dict
         ]
-        logging.info("removed: %s", removed_work_types)
-        logging.info("added:   %s", added_work_types)
+        log_info("removed: %s", removed_work_types)
+        log_info("added:   %s", added_work_types)
 
         for removed_work in removed_work_types:
             body = {
@@ -618,7 +664,7 @@ async def update_work_tasks_or_send_assembly_to_revision(request: web.Request):
         kept = [{"work_type_id": item[0], "work_type_name": item[1]} for item in zip(sub_task_work_type_ids, sub_task_work_type_names) if {"work_type_id": item[0], "work_type_name": item[1]} not in to_remove]
         final_list = kept + added_work_types
         new_first = final_list[0] if final_list else {"work_type_id": -1, "work_type_name": ""}
-        logging.info("new_first: %s", new_first)
+        log_info("new_first: %s", new_first)
 
         body = {
             "customFieldData": [
@@ -645,7 +691,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
         assembly_name = body["assembly_name"]
         order_id = int(body["order_id"])
         order_task = planfix_get(f"task/{order_id}?fields=name,{FIELD__ORDER_NUMBER},{FIELD__WORK_ORDER_OR_ASSEMBLY},{FIELD__ORDER_TYPE_COMMERCIAL},{FIELD__ORDER_TYPE_INNER}&sourceId=0").json()["task"]
-        logging.info("order_task %s", order_task)
+        log_info("order_task %s", order_task)
         order_name = order_task["name"]
         order_number = order_task["customFieldData"][2]["value"]
         order_type_inner_or_commercial = order_task["customFieldData"][1]
@@ -663,26 +709,26 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
         assembly_needs_coloring_checking = list([item == "Да" for item in body["assembly_needs_coloring_checking"]]) if len(str(body["assembly_needs_coloring_checking"])) > 0 else []
         assembly_coloring = int(body["assembly_coloring"]) if len(str(body["assembly_coloring"])) > 0 else 0
 
-        logging.info("\nvalidate_files_in_assembly_and_create_work")
-        logging.info("create_work_tasks %s", "true" if create_work_tasks else "false")
-        logging.info("assembly_id %d", assembly_id)
-        logging.info("assembly_name %s", assembly_name)
-        logging.info("order_id %d", order_id)
-        logging.info("order_name %s", order_name)
-        logging.info("order_number %s", order_number)
-        logging.info("is_order_commercial %s", "true" if is_order_commercial else "false")
-        logging.info("order_work_task_id %d", order_work_task_id)
-        logging.info("----------------------------------------")
-        logging.info("sub_task_ids %s", sub_task_ids)
-        logging.info("sub_task_template_ids %s", sub_task_template_ids)
-        logging.info("sub_task_counts %s", sub_task_counts)
-        logging.info("sub_task_cutting_needed %s", sub_task_cutting_needed)
-        logging.info("----------------------------------------")
-        logging.info("assembly_cost_calculation_files %s", assembly_cost_calculation_files)
-        logging.info("assembly_drawing_files %s", assembly_drawing_files)
-        logging.info("assembly_needs_drawing_files_checking %s", assembly_needs_drawing_files_checking)
-        logging.info("assembly_needs_coloring_checking %s", assembly_needs_coloring_checking)
-        logging.info("assembly_coloring %d", assembly_coloring)
+        log_info("\nvalidate_files_in_assembly_and_create_work")
+        log_info("create_work_tasks %s", "true" if create_work_tasks else "false")
+        log_info("assembly_id %d", assembly_id)
+        log_info("assembly_name %s", assembly_name)
+        log_info("order_id %d", order_id)
+        log_info("order_name %s", order_name)
+        log_info("order_number %s", order_number)
+        log_info("is_order_commercial %s", "true" if is_order_commercial else "false")
+        log_info("order_work_task_id %d", order_work_task_id)
+        log_info("----------------------------------------")
+        log_info("sub_task_ids %s", sub_task_ids)
+        log_info("sub_task_template_ids %s", sub_task_template_ids)
+        log_info("sub_task_counts %s", sub_task_counts)
+        log_info("sub_task_cutting_needed %s", sub_task_cutting_needed)
+        log_info("----------------------------------------")
+        log_info("assembly_cost_calculation_files %s", assembly_cost_calculation_files)
+        log_info("assembly_drawing_files %s", assembly_drawing_files)
+        log_info("assembly_needs_drawing_files_checking %s", assembly_needs_drawing_files_checking)
+        log_info("assembly_needs_coloring_checking %s", assembly_needs_coloring_checking)
+        log_info("assembly_coloring %d", assembly_coloring)
 
         _tmp = []
         _tmp2 = []
@@ -705,7 +751,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
         material_name_to_id = {}
         for material_entry in material_directory:
             material_name = str(material_entry["customFieldData"][0]["value"]).upper()
-            material_name_to_id[material_name] = material_entry["key"]
+            material_name_to_id[material_name] = int(material_entry["key"])
 
         unique_work_names = {}
         unique_work_cuttings_user_group = {}
@@ -820,44 +866,61 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                         #     add_work_error("Количество файлов DVG/DXF больше чем 1")
                         #     continue
 
-                        thickness = 0
-                        material = ""
+                        is_list_cutting = False
+                        filenames = []
                         for file_id in work_files:
                             # Sort details based on Thicknesses, Material
-                            filename = planfix_get(f"file/{file_id}?fields=name").json()["file"]["name"]
+                            filename = str(planfix_get(f"file/{file_id}?fields=name").json()["file"]["name"])
+                            filenames.append(filename)
+                            if (".dwg" in filename.lower() or
+                                ".dxf" in filename.lower()):
+                                is_list_cutting = True
+                            elif is_list_cutting:
+                                add_work_error(f"Файлы на резку листа DWG/DXF должны быть все DWG/DXF, но присутствует \"{filename[filename.rfind(".") + 1:]}\"")
+                                continue
 
-                            detail_data = parse_filename(filename)
-                            if "error" in detail_data.keys():
+                        group = None
+                        thickness = None
+                        material = None
+                        # Sort details based on Thicknesses, Material
+                        for i, file_id in enumerate(work_files):
+                            filename = filenames[i]
+                            detail_data = parse_filename(filename, material_name_to_id)
+                            log_info("%s, %s", filename, detail_data)
+                            if "error" in detail_data:
                                 add_work_error(detail_data["error"])
                                 has_wrong_file_names = True
                                 continue
 
-                            new_thickness = detail_data["thickness"]
-                            new_material = str(detail_data["material"]).upper()
-
-                            if thickness != 0 and thickness != new_thickness:
-                                add_work_error("Все толщины должны быть одинаковыми")
+                            new_group = detail_data["group"]
+                            if group is not None and group != new_group:
+                                add_work_error("Все группы должны быть одинаковыми")
                                 has_wrong_file_names = True
                                 continue
-                            thickness = new_thickness
+                            group = new_group
 
-                            if len(material) != 0 and material != new_material:
-                                add_work_error("Все материалы должны быть одинаковыми")
-                                has_wrong_file_names = True
-                                continue
-                            material = new_material
+                            if is_list_cutting:
+                                new_thickness = detail_data["thickness"]
+                                new_material = str(detail_data["material"]).upper()
 
-                            if material not in material_name_to_id:
-                                add_work_error(f"Неизвестный материал \"{detail_data["material"]}\"")
-                                has_wrong_file_names = True
-                                continue
+                                if thickness is not None and thickness != new_thickness:
+                                    add_work_error("Все толщины должны быть одинаковыми")
+                                    has_wrong_file_names = True
+                                    continue
+                                thickness = new_thickness
+
+                                if material is not None and material != new_material:
+                                    add_work_error("Все материалы должны быть одинаковыми")
+                                    has_wrong_file_names = True
+                                    continue
+                                material = new_material
 
                             detail_task.work_file_ids.append(file_id)
 
-                        if (work_type, thickness, material) not in unique_cutting_work:
-                            unique_cutting_work[(work_type, thickness, material)] = []
+                        if (work_type, group, thickness, material) not in unique_cutting_work:
+                            unique_cutting_work[(work_type, group, thickness, material)] = []
 
-                        unique_cutting_work[(work_type, thickness, material)].append(detail_task)
+                        unique_cutting_work[(work_type, group, thickness, material)].append(detail_task)
 
         if not has_subassemblies:
             if is_order_commercial and len(assembly_cost_calculation_files) == 0:
@@ -898,7 +961,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
             error_message = send_assembly_to_revision(assembly_id, reported_errors, error_cause)
             return web.json_response({"code": 1, "error_message": error_message})
 
-        logging.info("all files valid, sending task %d to %s", assembly_id, "cutting" if create_work_tasks else "confirmation")
+        log_info("all files valid, sending task %d to %s", assembly_id, "cutting" if create_work_tasks else "confirmation")
 
         if create_work_tasks:
             if len(unique_cutting_work) == 0:
@@ -963,17 +1026,17 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                 }
                 planfix_post(f"task/{assembly_id}?silent=true", body)
 
-                for (work, thickness, material) in unique_cutting_work.keys():
+                for (work_type, group, thickness, material) in unique_cutting_work.keys():
                     detail_ids = []
                     file_ids = []
                     cutting_user_group = -1
-                    for detail in unique_cutting_work[(work, thickness, material)]:
+                    for detail in unique_cutting_work[(work_type, group, thickness, material)]:
                         detail_ids.append(detail.get_id())
                         file_ids += detail.work_file_ids
-                        cutting_user_group = unique_work_cuttings_user_group[work]
+                        cutting_user_group = unique_work_cuttings_user_group[work_type]
 
                     body = {
-                        "name": f"{unique_work_names[work]} {material}(Материал) {thickness}(Толщина) Работа({order_number})",
+                        "name": f"{unique_work_names[work_type]} {material}(Материал) {thickness}(Толщина) Работа({order_number})",
                         "status": {"id": STATUS__CUTTING},
                         "processId": PROCESS__CUTTING,
                         "template": {"id": REST_API_TEMPLATE__WORK},
@@ -989,7 +1052,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                             },
                             {
                                 "field": {"id": FIELD__CURRENT_WORK_TYPE},
-                                "value": work
+                                "value": work_type
                             },
                             {
                                 "field": {"id": FIELD__DETAILS},
@@ -1000,12 +1063,16 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                                 "value": detail_ids
                             },
                             {
+                                "field": {"id": FIELD__GROUP},
+                                "value": group if group is not None else ""
+                            },
+                            {
                                 "field": {"id": FIELD__THICKNESS},
-                                "value": thickness
+                                "value": thickness if thickness is not None else ""
                             },
                             {
                                 "field": {"id": FIELD__MATERIAL},
-                                "value": material_name_to_id[material]
+                                "value": material_name_to_id[material] if material is not None else 0
                             },
                             {
                                 "field": {"id": FIELD__WORK_FILES},
@@ -1078,14 +1145,14 @@ async def change_task_status_when_previous_in_wait_goes_to_complete(request: web
         neighbor_task_status_ids = body["neighbor_task_status_ids"]
         status_id = int(body["status_id"])
 
-        logging.info("\nchange_task_status_when_previous_in_wait_goes_to_complete")
-        logging.info("task_id %d", task_id)
-        logging.info("parent_id %d", parent_id)
-        logging.info("sub_task_ids %s", neighbor_ids)
-        logging.info("neighbor_template_ids %s", neighbor_template_ids)
-        logging.info("neighbor_counts %s", neighbor_counts)
-        logging.info("neighbor_task_status_ids %s", neighbor_task_status_ids)
-        logging.info("status_id %d", status_id)
+        log_info("\nchange_task_status_when_previous_in_wait_goes_to_complete")
+        log_info("task_id %d", task_id)
+        log_info("parent_id %d", parent_id)
+        log_info("sub_task_ids %s", neighbor_ids)
+        log_info("neighbor_template_ids %s", neighbor_template_ids)
+        log_info("neighbor_counts %s", neighbor_counts)
+        log_info("neighbor_task_status_ids %s", neighbor_task_status_ids)
+        log_info("status_id %d", status_id)
 
         _tmp = []
         for i in range(len(neighbor_ids)):
@@ -1109,8 +1176,8 @@ async def change_task_status_when_previous_in_wait_goes_to_complete(request: web
             if neighbor_task.task_id == task_id:
                 past_current_task = True
 
-        logging.info("all_neighbors_complete %s", "true" if all_neighbors_complete else "false")
-        logging.info("next_task_id %d", next_task_id)
+        log_info("all_neighbors_complete %s", "true" if all_neighbors_complete else "false")
+        log_info("next_task_id %d", next_task_id)
 
         if not all_neighbors_complete or next_task_id == 0:
             return PlanfixOk()
@@ -1136,11 +1203,11 @@ async def change_work_status_to_work_or_wait_for_work(request: web.Request):
         sub_task_template_ids = body["sub_task_template_ids"]
         subtask_counts = str(body["subtask_counts"]).split(",")
 
-        logging.info("\nchange_work_status_to_work_or_wait_for_work")
-        logging.info("assembly_id %d", assembly_id)
-        logging.info("sub_task_ids %s", sub_task_ids)
-        logging.info("sub_task_template_ids %s", sub_task_template_ids)
-        logging.info("subtask_counts %s", subtask_counts)
+        log_info("\nchange_work_status_to_work_or_wait_for_work")
+        log_info("assembly_id %d", assembly_id)
+        log_info("sub_task_ids %s", sub_task_ids)
+        log_info("sub_task_template_ids %s", sub_task_template_ids)
+        log_info("subtask_counts %s", subtask_counts)
 
         _tmp = []
         _tmp2 = []
@@ -1206,10 +1273,10 @@ async def copy_assembly_status_to_order(request: web.Request):
         order_status_id = int(body["order_status_id"])
         subtask_status_id = int(body["subtask_status_id"])
 
-        logging.info("\ncopy_assembly_status_to_order")
-        logging.info("order_id %d", order_id)
-        logging.info("order_status_id %d", order_status_id)
-        logging.info("subtask_status_id %d", subtask_status_id)
+        log_info("\ncopy_assembly_status_to_order")
+        log_info("order_id %d", order_id)
+        log_info("order_status_id %d", order_status_id)
+        log_info("subtask_status_id %d", subtask_status_id)
 
         if order_status_id == subtask_status_id:
             return PlanfixOk()
@@ -1234,14 +1301,14 @@ async def recalculate_unused_details(request: web.Request):
         all_detail_ids = body["all_detail_ids"]
         used_detail_ids = body["used_detail_ids"][0].split(",") if len(body["used_detail_ids"]) > 0 else []
 
-        logging.info("\nrecalculate_unused_details")
-        logging.info("work_task_id %d", work_task_id)
-        logging.info("all_detail_ids %s", all_detail_ids)
-        logging.info("used_detail_ids %s", used_detail_ids)
+        log_info("\nrecalculate_unused_details")
+        log_info("work_task_id %d", work_task_id)
+        log_info("all_detail_ids %s", all_detail_ids)
+        log_info("used_detail_ids %s", used_detail_ids)
 
         _set = set(used_detail_ids)
         result = [x for x in all_detail_ids if x not in _set]
-        logging.info("result %s", result)
+        log_info("result %s", result)
 
         body = {
             "customFieldData": [
@@ -1269,11 +1336,11 @@ async def add_workers(request: web.Request):
         detail_worker_names = detail_worker_names_init if len(detail_worker_names_init) > 1 else detail_worker_names_init[0].split(",")
         detail_work_task_ids = body["detail_work_task_ids"]
 
-        logging.info("\nadd_workers")
-        logging.info("detail_task_id %d", detail_task_id)
-        logging.info("detail_worker_names__start_value %s", detail_worker_names_init)
-        logging.info("detail_worker_names %s", detail_worker_names)
-        logging.info("detail_work_task_ids %s", detail_work_task_ids)
+        log_info("\nadd_workers")
+        log_info("detail_task_id %d", detail_task_id)
+        log_info("detail_worker_names__start_value %s", detail_worker_names_init)
+        log_info("detail_worker_names %s", detail_worker_names)
+        log_info("detail_work_task_ids %s", detail_work_task_ids)
 
         detail_worker_names_tmp = detail_worker_names
         detail_worker_names = []
@@ -1283,13 +1350,13 @@ async def add_workers(request: web.Request):
             detail_worker_name_ss = detail_worker_name.split(",")
             for tmp in detail_worker_name_ss:
                 detail_worker_names.append(tmp)
-        logging.info("detail_worker_names %s", detail_worker_names)
+        log_info("detail_worker_names %s", detail_worker_names)
 
         detail_workers = []
         for worker_group_name in detail_worker_names:
             detail_workers.append({"id": get_user_group_id_from_name(worker_group_name)})
 
-        logging.info("detail_workers %s", detail_workers)
+        log_info("detail_workers %s", detail_workers)
 
         for task_id in detail_work_task_ids:
             task_id = int(task_id)
@@ -1329,18 +1396,18 @@ async def set_current_work_to_parent_and_movement_between_departments(request: w
         current_work_id = int(body["current_work_id"])
         previous_work_id = int(body["previous_work_id"])
 
-        logging.info("\nset_current_work_to_parent_and_movement_between_departments")
-        logging.info("work_task_ids %s", work_task_ids)
-        logging.info("work_task_status_ids %s", work_task_status_ids)
-        logging.info("parent_task_id %d", parent_task_id)
-        logging.info("current_work_id %d", current_work_id)
-        logging.info("previous_work_id %d", previous_work_id)
+        log_info("\nset_current_work_to_parent_and_movement_between_departments")
+        log_info("work_task_ids %s", work_task_ids)
+        log_info("work_task_status_ids %s", work_task_status_ids)
+        log_info("parent_task_id %d", parent_task_id)
+        log_info("current_work_id %d", current_work_id)
+        log_info("previous_work_id %d", previous_work_id)
 
         current_work_group_id = int(planfix_get(f"directory/{DIRECTORY__PROCESSING_TYPE}/entry/{current_work_id}?fields=parentKey").json()["entry"]["parentKey"])
         previous_work_group_id = int(planfix_get(f"directory/{DIRECTORY__PROCESSING_TYPE}/entry/{previous_work_id}?fields=parentKey").json()["entry"]["parentKey"])
 
-        logging.info("current_work_group_id %d", current_work_group_id)
-        logging.info("previous_work_group_id %d", previous_work_group_id)
+        log_info("current_work_group_id %d", current_work_group_id)
+        log_info("previous_work_group_id %d", previous_work_group_id)
 
         if current_work_group_id != previous_work_group_id:
             body = {
@@ -1382,13 +1449,13 @@ async def reset_assembly_after_return_from_work(request: web.Request):
         work_belongs_to_order = body["work_belongs_to_order"]
         subtask_counts = str(body["subtask_counts"]).split(",")
 
-        logging.info("\nreset_assembly_after_return_from_work")
-        logging.info("assembly_id %d", assembly_id)
-        logging.info("sub_task_ids %s", sub_task_ids)
-        logging.info("sub_task_template_ids %s", sub_task_template_ids)
-        logging.info("work_belongs_to_assembly %s", work_belongs_to_assembly)
-        logging.info("work_belongs_to_order %s", work_belongs_to_order)
-        logging.info("subtask_counts %s", subtask_counts)
+        log_info("\nreset_assembly_after_return_from_work")
+        log_info("assembly_id %d", assembly_id)
+        log_info("sub_task_ids %s", sub_task_ids)
+        log_info("sub_task_template_ids %s", sub_task_template_ids)
+        log_info("work_belongs_to_assembly %s", work_belongs_to_assembly)
+        log_info("work_belongs_to_order %s", work_belongs_to_order)
+        log_info("subtask_counts %s", subtask_counts)
 
         _tmp = []
         _tmp2 = []
@@ -1501,10 +1568,10 @@ async def accept_cutting_job(request: web.Request):
         detail_work_task_ids = body["detail_work_task_ids"][0].split(",")
         detail_work_task_work_types = body["detail_work_task_work_types"][0].split(",")
 
-        logging.info("\naccept_cutting_job")
-        logging.info("cutting_work_type %s", cutting_work_type)
-        logging.info("detail_work_task_ids %s", detail_work_task_ids)
-        logging.info("detail_work_task_work_types %s", detail_work_task_work_types)
+        log_info("\naccept_cutting_job")
+        log_info("cutting_work_type %s", cutting_work_type)
+        log_info("detail_work_task_ids %s", detail_work_task_ids)
+        log_info("detail_work_task_work_types %s", detail_work_task_work_types)
 
         for i, work_task_id in enumerate(detail_work_task_ids):
             if cutting_work_type == int(detail_work_task_work_types[i]):
@@ -1535,10 +1602,10 @@ async def set_parent_status_if_child_status_not_equal(request: web.Request):
         desired_children_status_id = int(body["desired_children_status_id"])
         new_parent_status_id = int(body["new_parent_status_id"])
 
-        logging.info("\nset_parent_status_if_child_status_not_equal")
-        logging.info("parent_task_id %d", parent_task_id)
-        logging.info("children_status_ids %s", children_status_ids)
-        logging.info("desired_children_status_id %d", desired_children_status_id)
+        log_info("\nset_parent_status_if_child_status_not_equal")
+        log_info("parent_task_id %d", parent_task_id)
+        log_info("children_status_ids %s", children_status_ids)
+        log_info("desired_children_status_id %d", desired_children_status_id)
 
         if len(children_status_ids) != 0:
             all_desired = True
@@ -1570,9 +1637,9 @@ async def copy_child_status_to_parent(request: web.Request):
         parent_task_id = int(parent_task_id_str)
         children_status_ids = body["children_status_ids"]
 
-        logging.info("\ncopy_child_status_to_parent")
-        logging.info("parent_task_id %d", parent_task_id)
-        logging.info("children_status_ids %s", children_status_ids)
+        log_info("\ncopy_child_status_to_parent")
+        log_info("parent_task_id %d", parent_task_id)
+        log_info("children_status_ids %s", children_status_ids)
 
         if len(children_status_ids) != 0:
             all_same = True
@@ -1605,11 +1672,11 @@ async def copy_parent_status_to_children(request: web.Request):
         children_ids = body["children_ids"]
         children_status_ids = body["children_status_ids"]
 
-        logging.info("\ncopy_parent_status_to_children")
-        logging.info("parent_task_id %d", parent_task_id)
-        logging.info("parent_status_id %d", parent_status_id)
-        logging.info("children_ids %s", children_ids)
-        logging.info("children_status_ids %s", children_status_ids)
+        log_info("\ncopy_parent_status_to_children")
+        log_info("parent_task_id %d", parent_task_id)
+        log_info("parent_status_id %d", parent_status_id)
+        log_info("children_ids %s", children_ids)
+        log_info("children_status_ids %s", children_status_ids)
 
         body = {
             "status": {"id": parent_status_id}
@@ -1639,11 +1706,11 @@ async def complete_work_from_children(request: web.Request):
         is_order_work_task = bool(body["is_order_work_task"])
         order_task_id = int(body["order_task_id"])
 
-        logging.info("\ncomplete_work_from_children")
-        logging.info("work_task_id %d", work_task_id)
-        logging.info("children_statuses %s", children_statuses)
-        logging.info("is_order_work_task %s", "true" if is_order_work_task else "false")
-        logging.info("order_task_id %d", order_task_id)
+        log_info("\ncomplete_work_from_children")
+        log_info("work_task_id %d", work_task_id)
+        log_info("children_statuses %s", children_statuses)
+        log_info("is_order_work_task %s", "true" if is_order_work_task else "false")
+        log_info("order_task_id %d", order_task_id)
 
         all_complete = False
         for status_id in children_statuses:
@@ -1663,7 +1730,7 @@ async def complete_work_from_children(request: web.Request):
             if is_order_work_task:
                 planfix_post(f"task/{order_task_id}?silent=false", body)
 
-            logging.info("Complete: status %d", status)
+            log_info("Complete: status %d", status)
 
         return PlanfixOk()
     except Exception as e:
@@ -1679,9 +1746,9 @@ async def complete_work_from_children2(request: web.Request):
         work_task_id = int(body["work_task_id"])
         children_statuses = body["children_statuses"]
 
-        logging.info("\ncomplete_work_from_children2")
-        logging.info("work_task_id %d", work_task_id)
-        logging.info("children_statuses %s", children_statuses)
+        log_info("\ncomplete_work_from_children2")
+        log_info("work_task_id %d", work_task_id)
+        log_info("children_statuses %s", children_statuses)
         all_complete = False
         for status_id in children_statuses:
             if int(status_id) != STATUS__MATERIAL_EXISTENCE_CONFIRMATION:
@@ -1696,7 +1763,7 @@ async def complete_work_from_children2(request: web.Request):
             }
             planfix_post(f"task/{work_task_id}?silent=false", body)
 
-            logging.info("Complete: status %d", STATUS__MATERIAL_EXISTENCE_CONFIRMATION)
+            log_info("Complete: status %d", STATUS__MATERIAL_EXISTENCE_CONFIRMATION)
 
         return PlanfixOk()
     except Exception as e:
@@ -1713,10 +1780,10 @@ async def complete_detail_work_from_cutting(request: web.Request):
         detail_work_task_type_ids = body["detail_work_task_type_ids"][0].split(",")
         detail_work_task_ids = body["detail_work_task_ids"][0].split(",")
 
-        logging.info("\ncomplete_detail_work_from_cutting")
-        logging.info("work_type_id %d", work_type_id)
-        logging.info("detail_work_task_type_ids %s", detail_work_task_type_ids)
-        logging.info("detail_work_task_ids %s", detail_work_task_ids)
+        log_info("\ncomplete_detail_work_from_cutting")
+        log_info("work_type_id %d", work_type_id)
+        log_info("detail_work_task_type_ids %s", detail_work_task_type_ids)
+        log_info("detail_work_task_ids %s", detail_work_task_ids)
 
         for i, detail_work_type_id in enumerate(detail_work_task_type_ids):
             if int(detail_work_type_id) == work_type_id:
@@ -1724,7 +1791,7 @@ async def complete_detail_work_from_cutting(request: web.Request):
                     "status": {"id": STATUS__COMPLETE}
                 }
                 planfix_post(f"task/{int(detail_work_task_ids[i])}?silent=false", body)
-                logging.info(planfix_get(f"task/{int(detail_work_task_ids[i])}?fields=name&sourceId=0").json()["task"]["name"])
+                log_info(planfix_get(f"task/{int(detail_work_task_ids[i])}?fields=name&sourceId=0").json()["task"]["name"])
 
         return PlanfixOk()
     except Exception as e:
@@ -1741,13 +1808,13 @@ async def complete_details_from_cutting(request: web.Request):
         work_type_ids = body["work_type_ids"][0].split(",")
         work_ids = body["work_ids"][0].split(",")
 
-        logging.info("\ncomplete_details_from_cutting")
-        logging.info("work_type_ids %s", work_type_ids)
-        logging.info("work_ids %s", work_ids)
+        log_info("\ncomplete_details_from_cutting")
+        log_info("work_type_ids %s", work_type_ids)
+        log_info("work_ids %s", work_ids)
 
         for i, work_id in enumerate(work_ids):
             if int(work_type_ids[i]) == work_type_id:
-                logging.info(planfix_get(f"task/{int(work_id)}?fields=name&sourceId=0").json()["task"]["name"])
+                log_info(planfix_get(f"task/{int(work_id)}?fields=name&sourceId=0").json()["task"]["name"])
 
         return PlanfixOk()
     except Exception as e:
@@ -1764,9 +1831,9 @@ async def create_cutting_from_work(request: web.Request):
         work_name = body["work_name"]
         cutting_count = int(body["cutting_count"])
 
-        logging.info("\ncreate_cutting_from_work")
-        logging.info("task_id %d", task_id)
-        logging.info("work_name %s", work_name)
+        log_info("\ncreate_cutting_from_work")
+        log_info("task_id %d", task_id)
+        log_info("work_name %s", work_name)
 
         body = {
             "name": f"Раскрой листа №{cutting_count} {work_name}",
@@ -1789,11 +1856,11 @@ async def complete_assembly_from_work(request: web.Request):
         subtask_statuses = body["subtask_statuses"]
         order_assembly_work_count = int(str(body["order_assembly_work_count"]) if len(str(body["order_assembly_work_count"])) != 0 else 0)
 
-        logging.info("\ncomplete_assembly_from_work")
-        logging.info("task_id %d", task_id)
-        logging.info("parent_task_first_level_assembly %s", "true" if parent_task_first_level_assembly else "false")
-        logging.info("subtask_statuses %s", subtask_statuses)
-        logging.info("order_assembly_work_count %d", order_assembly_work_count)
+        log_info("\ncomplete_assembly_from_work")
+        log_info("task_id %d", task_id)
+        log_info("parent_task_first_level_assembly %s", "true" if parent_task_first_level_assembly else "false")
+        log_info("subtask_statuses %s", subtask_statuses)
+        log_info("order_assembly_work_count %d", order_assembly_work_count)
 
         all_subtasks_complete = True
         for i in range(len(subtask_statuses)):
@@ -1803,7 +1870,7 @@ async def complete_assembly_from_work(request: web.Request):
                 all_subtasks_complete = False
 
         if all_subtasks_complete:
-            logging.info("All subtasks tasks complete. Completing parent task")
+            log_info("All subtasks tasks complete. Completing parent task")
 
             if parent_task_first_level_assembly and order_assembly_work_count == 0:
                 body = {
@@ -1830,9 +1897,9 @@ async def complete_detail_from_work(request: web.Request):
         task_id = int(body["task_id"])
         subtask_statuses = body["subtask_statuses"]
 
-        logging.info("\ncomplete_detail_from_work")
-        logging.info("task_id %d", task_id)
-        logging.info("subtask_statuses %s", subtask_statuses)
+        log_info("\ncomplete_detail_from_work")
+        log_info("task_id %d", task_id)
+        log_info("subtask_statuses %s", subtask_statuses)
 
         all_subtasks_complete = True
         for i in range(len(subtask_statuses)):
@@ -1842,7 +1909,7 @@ async def complete_detail_from_work(request: web.Request):
                 all_subtasks_complete = False
 
         if all_subtasks_complete:
-            logging.info("All subtasks tasks complete. Completing parent task")
+            log_info("All subtasks tasks complete. Completing parent task")
 
             body = {
                 "status": {"id": STATUS__COMPLETE}
@@ -1864,10 +1931,10 @@ async def complete_assembly_from_details(request: web.Request):
         subtask_statuses = body["subtask_statuses"]
         is_first_level_assembly = int(body["is_first_level_assembly"]) == 1
 
-        logging.info("\ncomplete_assembly_from_details")
-        logging.info("task_id %d", task_id)
-        logging.info("subtask_statuses %s", subtask_statuses)
-        logging.info("is_first_level_assembly %s", "true" if is_first_level_assembly else "false")
+        log_info("\ncomplete_assembly_from_details")
+        log_info("task_id %d", task_id)
+        log_info("subtask_statuses %s", subtask_statuses)
+        log_info("is_first_level_assembly %s", "true" if is_first_level_assembly else "false")
 
         all_subtasks_complete = True
         for i in range(len(subtask_statuses)):
@@ -1877,7 +1944,7 @@ async def complete_assembly_from_details(request: web.Request):
                 all_subtasks_complete = False
 
         if all_subtasks_complete:
-            logging.info("All subtasks tasks complete. Completing parent task")
+            log_info("All subtasks tasks complete. Completing parent task")
 
             body = {
                 "status": {"id": STATUS__READY if is_first_level_assembly else STATUS__COMPLETE}
@@ -1900,9 +1967,9 @@ async def add_confirmation_people(request: web.Request):
         confirmation_needed = re.sub(r":\s*,", ": [],", confirmation_needed)
         confirmation_needed = eval(confirmation_needed)
 
-        logging.info("\nadd_confirmation_people")
-        logging.info("main_task_id %d", main_task_id)
-        logging.info("confirmation_needed %s", confirmation_needed)
+        log_info("\nadd_confirmation_people")
+        log_info("main_task_id %d", main_task_id)
+        log_info("confirmation_needed %s", confirmation_needed)
 
         main_task = planfix_get(f"task/{main_task_id}?fields=id,name,assignees&sourceId=0").json()["task"]
 
@@ -1953,7 +2020,7 @@ async def add_confirmation_people(request: web.Request):
                 break
 
         if update_task:
-            logging.info("confirmation needed, adding confirmation people")
+            log_info("confirmation needed, adding confirmation people")
             planfix_post(f"task/{main_task_id}?silent=false", body)
 
         return PlanfixOk()
@@ -1970,9 +2037,9 @@ async def check_material_completeness(request: web.Request):
         main_task_id = int(body["main_task_id"])
         tasks_materials = body["tasks_materials"]
 
-        logging.info("\ncheck_material_completeness")
-        logging.info("main_task_id %d", main_task_id)
-        logging.info("tasks_materials %s", tasks_materials)
+        log_info("\ncheck_material_completeness")
+        log_info("main_task_id %d", main_task_id)
+        log_info("tasks_materials %s", tasks_materials)
 
         all_materials_found = True
         for i in range(len(tasks_materials[0][0].split(","))):
@@ -1984,7 +2051,7 @@ async def check_material_completeness(request: web.Request):
                     all_materials_found = False
 
         if all_materials_found:
-            logging.info("All materials found")
+            log_info("All materials found")
 
             body = {
                 "status": {"id": STATUS__MATERIAL_EXISTENCE_CONFIRMATION},
@@ -2014,11 +2081,11 @@ async def create_work_tasks_from_parent_task(request: web.Request):
         is_assembly = bool(body["is_assembly"])
         is_order = bool(body["is_order"])
 
-        logging.info("\ncreate_work_tasks_from_parent_task")
-        logging.info("task_id %d", task_id)
-        logging.info("work_to_order %s", work_to_order)
-        logging.info("is_assembly %s", "true" if is_assembly else "false")
-        logging.info("is_order %s", "true" if is_order else "false")
+        log_info("\ncreate_work_tasks_from_parent_task")
+        log_info("task_id %d", task_id)
+        log_info("work_to_order %s", work_to_order)
+        log_info("is_assembly %s", "true" if is_assembly else "false")
+        log_info("is_order %s", "true" if is_order else "false")
 
         is_first = True
         for i in range(len(work_to_order[0])):
@@ -2408,7 +2475,7 @@ async def create_typical_parts(request: web.Request):
         clean_tmp_files()
 
         output_json = {"code": 0, "message": "Ok", "dxf_files": output_dxf_parts, "pdf_files": output_pdf_parts, "igs_files": output_igs_parts}
-        logging.info(output_json)
+        log_info(output_json)
         return web.json_response(output_json)
     except Exception as e:
         print_error(e)
@@ -2416,9 +2483,9 @@ async def create_typical_parts(request: web.Request):
 
 
 def main():
-    logging.info("\033[32m====================================================\033[0m")
-    logging.info("\033[35m(PlanfixZTTA)\033[32m  ---Program start---\033[0m")
-    logging.info("\033[32m====================================================\033[0m")
+    log_info("\033[32m====================================================\033[0m")
+    log_info("\033[35m(PlanfixZTTA)\033[32m  ---Program start---\033[0m")
+    log_info("\033[32m====================================================\033[0m")
 
     # clean_dwg_files()
     # clean_tmp_files()
@@ -2432,16 +2499,19 @@ def main():
     for route in list(app.router.routes()):
         cors.add(route, {"https://ztta.planfix.kg": aiohttp_cors.ResourceOptions(allow_credentials=True, expose_headers="*", allow_headers="*")})
 
-    while True:
-        try:
+    # while True:
+    #     try:
             # ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
             # ssl_context.check_hostname = False
             # ssl_context.load_cert_chain('/etc/letsencrypt/live/ztta.planfix_app.kg/fullchain.pem', '/etc/letsencrypt/live/ztta.planfix_app.kg/privkey.pem')
 
-            aiohttp.web.run_app(app, host=HOST, port=PORT)  # , ssl_context=ssl_context)
-        except Exception as e:
-            print_error(e)
-            sleep(15)
+    aiohttp.web.run_app(app, host=HOST, port=PORT)  # , ssl_context=ssl_context)
+        # except KeyboardInterrupt:
+        #     print("\nInterrupted by user. Exiting...")
+        #     sys.exit(0)
+        # except Exception as e:
+        #     print_error(e)
+        #     sleep(15)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,22 @@ class ConsoleColor:
     Gray = "\033[37m"
 
 
+def log_info(msg, *args):
+    # if len(args) > 0:
+    #     print(msg % args)
+    # else:
+    #     print(msg)
+
+    logging.info(msg, *args)
+def log_error(msg, *args):
+    # if len(args) > 0:
+    #     print(msg % args)
+    # else:
+    #     print(msg)
+
+    logging.error(msg, *args)
+
+
 def get_current_function_name():
     return inspect.stack()[2][3]
 
@@ -22,12 +38,14 @@ def get_current_code_point():
 
 def print_error(e: str | Exception = None):
     message = f"[{get_current_function_name()}:{get_current_code_point()}] Error occurred: {traceback.format_exc()}"
+    if e is str:
+        message += " " + e
 
     with open("app.log", "a") as file:
         file.write(message.replace("", ""))
         file.write("\n")
 
-    logging.error(f"{ConsoleColor.Red}{message}{ConsoleColor.Clear}")
+    log_error(f"{ConsoleColor.Red}{message}{ConsoleColor.Clear}")
 
 
 def print_warn(e: str = None):
@@ -37,4 +55,4 @@ def print_warn(e: str = None):
         file.write(message.replace("", ""))
         file.write("\n")
 
-    logging.error(f"{ConsoleColor.Yellow}{message}{ConsoleColor.Clear}")
+    log_error(f"{ConsoleColor.Yellow}{message}{ConsoleColor.Clear}")
