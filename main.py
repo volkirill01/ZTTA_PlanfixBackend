@@ -1,12 +1,14 @@
 import os
 import re
 import sys
+import configparser
 from time import sleep
 
 import aiohttp
 from aiohttp import web
 import aiohttp_cors
 
+import base
 from igs_generator.igs_generator import IGSGenerator
 from planfix_api import *
 from base import *
@@ -101,6 +103,13 @@ HTML_COLOR_ACCENT = "#CC00CC"
 
 
 test_filename_parsing = False
+
+
+config = configparser.ConfigParser()
+config.read("config.ini")
+
+is_dev = config.getboolean("Main", "IsDev")
+base.is_dev = is_dev
 
 
 class PlanfixOk(web.HTTPOk):

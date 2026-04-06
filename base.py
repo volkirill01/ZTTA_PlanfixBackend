@@ -11,20 +11,26 @@ class ConsoleColor:
     Gray = "\033[37m"
 
 
+is_dev = False
+
+
 def log_info(msg, *args):
-    # if len(args) > 0:
-    #     print(msg % args)
-    # else:
-    #     print(msg)
+    if is_dev:
+        if len(args) > 0:
+            print(msg % args)
+        else:
+            print(msg)
+    else:
+        logging.info(msg, *args)
 
-    logging.info(msg, *args)
 def log_error(msg, *args):
-    # if len(args) > 0:
-    #     print(msg % args)
-    # else:
-    #     print(msg)
-
-    logging.error(msg, *args)
+    if is_dev:
+        if len(args) > 0:
+            print(msg % args)
+        else:
+            print(msg)
+    else:
+        logging.error(msg, *args)
 
 
 def get_current_function_name():
