@@ -358,6 +358,12 @@ class Task:
     def get_id(self):
         return self.task_id
 
+    def get_parent(self):
+        if self.parent:
+            return self.parent
+
+        return None
+
     def get_parent_id(self):
         if self.parent:
             return self.parent.get_id()
@@ -778,6 +784,8 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
         unique_cutting_work = {}
         checked_tasks = []
         reported_errors = []
+        last_detail_task_id = None
+        last_processing_task_id = None
         has_subassemblies = False
         for sub_task in parent_task_tree.get_all_children():
             if sub_task.get_id() in checked_tasks:
@@ -831,7 +839,27 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                                                ': ' +
                                                f'<span style="color:{HTML_COLOR_ERROR};">Не выбран цвет покраски</span>')
 
+                case template_id if template_id == PLANFIX_TEMPLATE__DETAIL:
+                    last_detail_task_id = sub_task.task_id
+                    last_processing_task_id = None
+
                 case template_id if template_id == PLANFIX_TEMPLATE__PROCESSING:
+                    def add_work_error(message):
+                        reported_errors.append(f'<a href="https://ztta.planfix.com/task/{sub_task.get_parent_id()}">{get_task_name(sub_task.get_parent_id())}</a>'
+                                               ' &rarr; ' +
+                                               f'<a href="https://ztta.planfix.com/task/{sub_task.get_id()}">{get_task_name(sub_task.get_id())}</a>' +
+                                               ': ' +
+                                               f'<span style="color:{HTML_COLOR_ERROR};">{message}</span>')
+
+                    if last_detail_task_id is not None:
+                        if last_processing_task_id is not None and sub_task.cutting_needed:
+                            first_processing_task_id = sub_task.get_parent().children[0].task_id
+                            add_work_error(f'Обработка требующая раскроя должна быть первой в очереди, но первая в очереди <a href="https://ztta.planfix.com/task/{first_processing_task_id}">{get_task_name(first_processing_task_id)}</a>')
+                            last_detail_task_id = None
+                            continue
+
+                    last_processing_task_id = sub_task.task_id
+
                     task_data = planfix_get(f"task/{sub_task.task_id}?fields={FIELD__DRAWING_FILES},{FIELD__CURRENT_WORK_TYPE},{FIELD__WORK_FILES},{FIELD__COLORING}&sourceId=0").json()["task"]
 
                     coloring = task_data["customFieldData"][0]["value"]
@@ -847,13 +875,6 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                     work_files_check_needed = work_type_data[0]["value"]
                     drawing_files_check_needed = work_type_data[1]["value"]
                     coloring_check_needed = work_type_data[2]["value"]
-
-                    def add_work_error(message):
-                        reported_errors.append(f'<a href="https://ztta.planfix.com/task/{sub_task.get_parent_id()}">{get_task_name(sub_task.get_parent_id())}</a>'
-                                               ' &rarr; ' +
-                                               f'<a href="https://ztta.planfix.com/task/{sub_task.get_id()}">{get_task_name(sub_task.get_id())}</a>' +
-                                               ': ' +
-                                               f'<span style="color:{HTML_COLOR_ERROR};">{message}</span>')
 
                     work_files_is_missing = False
                     if work_files_check_needed and len(work_files) == 0:
