@@ -82,6 +82,7 @@ FIELD__MATERIAL_MOVEMENT = 105905  # Перемещение материалов
 FIELD__WELDING_CONFIRMATION = 105917  # Согласование (Сварки)
 FIELD__TURING_WORK_CONFIRMATION = 105919  # Согласование (Токарных работ)
 FIELD__COLORING = 106052 # Цвет покраски 2
+FIELD__PRODUCT_COUNT = 106046 # Количество изделий
 
 DIRECTORY__MATERIAL_SHEET = 19  # Материал (Лист)
 DIRECTORY__MATERIAL_SHEET__FIELD__NAME = 33  # Название
@@ -723,6 +724,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
         assembly_needs_drawing_files_checking = list([item == "Да" for item in body["assembly_needs_drawing_files_checking"]]) if len(str(body["assembly_needs_drawing_files_checking"])) > 0 else []
         assembly_needs_coloring_checking = list([item == "Да" for item in body["assembly_needs_coloring_checking"]]) if len(str(body["assembly_needs_coloring_checking"])) > 0 else []
         assembly_coloring = int(body["assembly_coloring"]) if len(str(body["assembly_coloring"])) > 0 else 0
+        assembly_product_count = int(body["assembly_product_count"]) if body["assembly_product_count"] else 0
 
         log_info("\nvalidate_files_in_assembly_and_create_work")
         log_info("create_work_tasks %s", "true" if create_work_tasks else "false")
@@ -787,6 +789,13 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
         last_detail_task_id = None
         last_processing_task_id = None
         has_subassemblies = False
+
+        if assembly_product_count <= 0:
+            reported_errors.append(
+                f'<a href="https://ztta.planfix.com/task/{assembly_id}">{get_task_name(assembly_id)}</a>' +
+                ': ' +
+                f'<span style="color:{HTML_COLOR_ERROR};">Количество изделий должно быть больше 0</span>')
+
         for sub_task in parent_task_tree.get_all_children():
             if sub_task.get_id() in checked_tasks:
                 continue
