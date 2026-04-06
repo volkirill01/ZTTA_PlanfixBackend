@@ -825,8 +825,8 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                         if work_coloring_check_needed:
                             coloring_check_needed = True
 
-                        if (work_drawing_files_needed or
-                            work_coloring_check_needed):
+                        if (drawing_files_needed and
+                            coloring_check_needed):
                             break
 
                     if is_order_commercial and len(cost_calculation_files) == 0:
@@ -841,7 +841,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                                                f'<span style="color:{HTML_COLOR_ERROR};">Нет файлов чертежей</span>')
                         has_missing_files = True
 
-                    if coloring_check_needed and coloring["value"] == "":
+                    if coloring_check_needed and len(coloring["value"]) == 0:
                         reported_errors.append(f'<a href="https://ztta.planfix.com/task/{sub_task.get_id()}">{get_task_name(sub_task.get_id())}</a>' +
                                                ': ' +
                                                f'<span style="color:{HTML_COLOR_ERROR};">Не выбран цвет покраски</span>')
@@ -892,7 +892,7 @@ async def validate_files_in_assembly_and_create_work(request: web.Request):
                         add_work_error("Нет файлов чертежей")
                         has_missing_files = True
 
-                    if coloring_check_needed and coloring["value"] == "":
+                    if coloring_check_needed and len(coloring["value"]) == 0:
                         add_work_error("Не выбран цвет покраски")
 
                     detail_task = sub_task.parent
@@ -2116,12 +2116,16 @@ async def create_work_tasks_from_parent_task(request: web.Request):
         work_to_order = body["work_to_order"]
         is_assembly = bool(body["is_assembly"])
         is_order = bool(body["is_order"])
+        assembly_drawing_files = body["assembly_drawing_files"]
+        assembly_coloring = int(body["assembly_coloring"]) if len(str(body["assembly_coloring"])) > 0 else None
 
         log_info("\ncreate_work_tasks_from_parent_task")
         log_info("task_id %d", task_id)
         log_info("work_to_order %s", work_to_order)
         log_info("is_assembly %s", "true" if is_assembly else "false")
         log_info("is_order %s", "true" if is_order else "false")
+        log_info("assembly_drawing_files %s", assembly_drawing_files)
+        log_info("assembly_coloring %d", assembly_coloring if assembly_coloring is not None else -1)
 
         is_first = True
         for i in range(len(work_to_order[0])):
@@ -2182,10 +2186,30 @@ async def create_work_tasks_from_parent_task(request: web.Request):
             body["name"] = work_to_order[1][i]
             body["template"] = {"id": REST_API_TEMPLATE__PROCESSING}
             body["parent"] = {"id": task_id}
-            body["customFieldData"].append({
+            body["customFieldData"].append(
+            {
                 "field": {"id": FIELD__ORDER},
                 "value": order_id
             })
+            body["customFieldData"].append(
+            {
+                "field": {"id": FIELD__DRAWING_FILES},
+                "value": assembly_drawing_files
+            })
+
+            if is_assembly and not is_order:
+                work_type = int(work_to_order[0][i])
+                work_type_data = planfix_get(f"directory/{DIRECTORY__PROCESSING_TYPE_ASSEMBLY}/entry/{work_type}?fields={DIRECTORY__PROCESSING_TYPE_ASSEMBLY__FIELD__CHECK_COLORING}").json()["entry"]["customFieldData"]
+
+                coloring_check_needed = work_type_data[0]["value"]
+
+                if coloring_check_needed:
+                    body["customFieldData"].append(
+                    {
+                        "field": {"id": FIELD__COLORING},
+                        "value": assembly_coloring
+                    })
+
             planfix_post("task/", body)
             is_first = False
 
