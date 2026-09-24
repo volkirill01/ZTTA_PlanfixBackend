@@ -232,14 +232,14 @@ class DXFGenerator:
                         p1=(part_pos.x, part_pos.y + rect_size.y),
                         p2=(part_pos.x + rect_size.x, part_pos.y + rect_size.y),
                         angle=0,
-                        text=f"{rect_size.x}mm"), dim_text_size)
+                        text=f"{rect_size.x}"), dim_text_size)
                     # Height
                     style_dim(self.msp.add_linear_dim(
                         base=(part_pos.x - dim_offset, part_pos.y),
                         p1=(part_pos.x, part_pos.y),
                         p2=(part_pos.x, part_pos.y + rect_size.y),
                         angle=90,
-                        text=f"{rect_size.y}mm"), dim_text_size)
+                        text=f"{rect_size.y}"), dim_text_size)
 
                 case self.PartType.RectWithHole:
                     rect_size = part["size"]
@@ -254,14 +254,14 @@ class DXFGenerator:
                         p1=(part_pos.x, part_pos.y + rect_size.y),
                         p2=(part_pos.x + rect_size.x, part_pos.y + rect_size.y),
                         angle=0,
-                        text=f"{rect_size.x}mm"), dim_text_size)
+                        text=f"{rect_size.x}"), dim_text_size)
                     # Height
                     style_dim(self.msp.add_linear_dim(
                         base=(part_pos.x - dim_offset, part_pos.y),
                         p1=(part_pos.x, part_pos.y),
                         p2=(part_pos.x, part_pos.y + rect_size.y),
                         angle=90,
-                        text=f"{rect_size.y}mm"), dim_text_size)
+                        text=f"{rect_size.y}"), dim_text_size)
 
                     # Hole width
                     style_dim(self.msp.add_linear_dim(
@@ -269,14 +269,14 @@ class DXFGenerator:
                         p1=(part_pos.x + (rect_size.x - rect_hole_size.x) / 2, part_pos.y + (rect_size.y - rect_hole_size.y) / 2),
                         p2=(part_pos.x + (rect_size.x - rect_hole_size.x) / 2 + rect_hole_size.x, part_pos.y + (rect_size.y - rect_hole_size.y) / 2),
                         angle=0,
-                        text=f"{rect_hole_size.x}mm"), dim_text_size)
+                        text=f"{rect_hole_size.x}"), dim_text_size)
                     # Hole height
                     style_dim(self.msp.add_linear_dim(
                         base=(part_pos.x + rect_size.x - (rect_size.x - rect_hole_size.x) / 2 + dim_offset * 2, part_pos.y + (rect_size.y - rect_hole_size.y) / 2),
                         p1=(part_pos.x + rect_size.x - (rect_size.x - rect_hole_size.x) / 2, part_pos.y + (rect_size.y - rect_hole_size.y) / 2),
                         p2=(part_pos.x + rect_size.x - (rect_size.x - rect_hole_size.x) / 2, part_pos.y + (rect_size.y - rect_hole_size.y) / 2 + rect_hole_size.y),
                         angle=90,
-                        text=f"{rect_hole_size.y}mm"), dim_text_size)
+                        text=f"{rect_hole_size.y}"), dim_text_size)
 
                 case self.PartType.Triangle:
                     triangle_size = part["size"]
@@ -286,14 +286,14 @@ class DXFGenerator:
                         p1=(part_pos.x, part_pos.y),
                         p2=(part_pos.x + triangle_size.x, part_pos.y),
                         angle=0,
-                        text=f"{triangle_size.x}mm"), dim_text_size)
+                        text=f"{triangle_size.x}"), dim_text_size)
                     # Height
                     style_dim(self.msp.add_linear_dim(
                         base=(part_pos.x - dim_offset, part_pos.y),
                         p1=(part_pos.x, part_pos.y),
                         p2=(part_pos.x, part_pos.y + triangle_size.y),
                         angle=90,
-                        text=f"{triangle_size.y}mm"), dim_text_size)
+                        text=f"{triangle_size.y}"), dim_text_size)
 
                 case self.PartType.Circle:
                     circle_diameter = part["diameter"]
@@ -302,7 +302,7 @@ class DXFGenerator:
                         (part_pos.x, part_pos.y),
                         angle=180,
                         radius=circle_diameter / 2,
-                        text=f"{circle_diameter}mm"),
+                        text=f"{circle_diameter}"),
                         dim_text_size)
 
                 case self.PartType.CircleWithHole:
@@ -318,13 +318,13 @@ class DXFGenerator:
                         p1=(part_pos.x - circle_diameter / 2, part_pos.y),
                         p2=(part_pos.x + circle_diameter / 2, part_pos.y),
                         angle=0,
-                        text=f"{circle_diameter}mm"), dim_text_size)
+                        text=f"{circle_diameter}"), dim_text_size)
                     # Hole diameter
                     style_dim(self.msp.add_diameter_dim(
                         (part_pos.x, part_pos.y),
                         angle=-225,
                         radius=circle_hole_diameter / 2,
-                        text=f"{circle_hole_diameter}mm"),
+                        text=f"{circle_hole_diameter}"),
                         dim_text_size)
 
                 case self.PartType.Text:
@@ -348,7 +348,7 @@ class DXFGenerator:
         block_offset += block_height
 
         block_pos = Vec2(blueprint_pos.x + blueprint_size.x - block_width, blueprint_pos.y + block_offset)
-        self.add_blueprint_block(block_pos, block_width, block_height, f"Толщина: {self.part_thickness}mm")
+        self.add_blueprint_block(block_pos, block_width, block_height, f"Толщина: {self.part_thickness}")
         block_offset += block_height
 
         block_pos = Vec2(blueprint_pos.x + blueprint_size.x - block_width, blueprint_pos.y + block_offset)

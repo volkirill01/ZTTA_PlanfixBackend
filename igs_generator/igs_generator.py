@@ -77,7 +77,7 @@ class IGSGenerator:
 
             self.igs_data += line + "\n"
 
-        self.filepath = f"Tube_C_{outer_diameter}x{thickness}_{length}mm".replace(",", ".")
+        self.filepath = f"Tube_C_{outer_diameter}x{thickness}_{length}".replace(",", ".")
 
     def generate_rect_tube(self, width: float, height: float, thickness: float, length: float):
         outer_width = width / 2
@@ -105,7 +105,7 @@ class IGSGenerator:
 
             self.igs_data += line + "\n"
 
-        self.filepath = f"Tube_R_{width}x{height}x{thickness}_{length}mm".replace(",", ".")
+        self.filepath = f"Tube_R_{width}x{height}x{thickness}_{length}".replace(",", ".")
 
     def save(self) -> str:
         # Save IGS to output filepath

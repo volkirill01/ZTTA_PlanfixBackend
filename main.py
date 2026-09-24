@@ -2253,7 +2253,7 @@ async def create_typical_parts(request: web.Request):
 
             for field in analitic["data"]:
                 match field["name"]:
-                    case "Толщина(мм)":
+                    case "Толщина":
                         try:
                             part_thickness = float(field["value"])
                         except Exception as e:
@@ -2270,34 +2270,34 @@ async def create_typical_parts(request: web.Request):
                     case "Материал":
                         part_material = field["value"]
 
-                    case "Ширина(мм)":
+                    case "Ширина":
                         try:
                             rect_width = float(field["value"])
                         except Exception as e:
                             print_error(e)
                             rect_width = 0.0
-                    case "Высота(мм)":
+                    case "Высота":
                         try:
                             rect_height = float(field["value"])
                         except Exception as e:
                             print_error(e)
                             rect_height = 0.0
 
-                    case "Диаметр(мм)":
+                    case "Диаметр":
                         try:
                             circle_diameter = float(field["value"])
                         except Exception as e:
                             print_error(e)
                             circle_diameter = 0.0
 
-                    case "Диаметр отверстия(мм)":
+                    case "Диаметр отверстия":
                         try:
                             circle_hole_diameter = float(field["value"])
                         except Exception as e:
                             print_error(e)
                             circle_hole_diameter = 0.0
 
-                    case "Длина(мм)":
+                    case "Длина":
                         try:
                             tube_length = float(field["value"])
                         except Exception as e:
@@ -2374,7 +2374,7 @@ async def create_typical_parts(request: web.Request):
                     filepath = part_name + (
                             (f" {circle_diameter:.10f}".rstrip('0').rstrip('.')) +
                             (f"x{part_thickness:.10f}".rstrip('0').rstrip('.')) +
-                            (f"_{tube_length:.10f}".rstrip('0').rstrip('.') + "мм") +
+                            (f"_{tube_length:.10f}".rstrip('0').rstrip('.')) +
                             f"_{part_material}_{part_count}шт").replace(",", ".")
                 case "Труба [Прямоугольник]":
                     tube_type = IGSGenerator.TubeType.Rectangle
@@ -2382,7 +2382,7 @@ async def create_typical_parts(request: web.Request):
                             (f" {rect_width:.10f}".rstrip('0').rstrip('.')) +
                             (f"x{rect_height:.10f}".rstrip('0').rstrip('.')) +
                             (f"x{part_thickness:.10f}".rstrip('0').rstrip('.')) +
-                            (f"_{tube_length:.10f}".rstrip('0').rstrip('.') + "мм") +
+                            (f"_{tube_length:.10f}".rstrip('0').rstrip('.')) +
                             f"_{part_material}_{part_count}шт").replace(",", ".")
 
             if tube_type is None:
