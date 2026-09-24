@@ -2334,7 +2334,7 @@ async def create_typical_parts(request: web.Request):
 
             filepath = part_name
             match analitic["analitic"]["name"]:
-                case "Типовая деталь [Прямоугольник]":
+                case "Типовая деталь Прямоугольник":
                     if len(part_name) == 0:
                         part_name = "Прямоугольник"
                     part_type = DXFGenerator.PartType.Rect
@@ -2343,7 +2343,7 @@ async def create_typical_parts(request: web.Request):
                             (f"x{rect_height:.10f}".rstrip('0').rstrip('.')) +
                             (f"x{rect_width:.10f}".rstrip('0').rstrip('.')) +
                             f"_{part_material}_{part_count}шт")
-                case "Типовая деталь [Косынка]":
+                case "Типовая деталь Косынка":
                     if len(part_name) == 0:
                         part_name = "Косынка"
                     part_type = DXFGenerator.PartType.Triangle
@@ -2352,7 +2352,7 @@ async def create_typical_parts(request: web.Request):
                             (f"x{rect_height:.10f}".rstrip('0').rstrip('.')) +
                             (f"x{rect_width:.10f}".rstrip('0').rstrip('.')) +
                             f"_{part_material}_{part_count}шт")
-                case "Типовая деталь [Круг]":
+                case "Типовая деталь Круг":
                     if len(part_name) == 0:
                         part_name = "Круг"
                     part_type = DXFGenerator.PartType.Circle
@@ -2360,7 +2360,7 @@ async def create_typical_parts(request: web.Request):
                             (f" {part_thickness:.10f}".rstrip('0').rstrip('.')) +
                             (f"x{circle_diameter:.10f}".rstrip('0').rstrip('.')) +
                             f"_{part_material}_{part_count}шт")
-                case "Типовая деталь [Шайба]":
+                case "Типовая деталь Шайба":
                     if len(part_name) == 0:
                         part_name = "Шайба"
                     part_type = DXFGenerator.PartType.CircleWithHole
@@ -2369,14 +2369,14 @@ async def create_typical_parts(request: web.Request):
                             (f"x{circle_diameter:.10f}".rstrip('0').rstrip('.')) +
                             (f"x{circle_hole_diameter:.10f}".rstrip('0').rstrip('.')) +
                             f"_{part_material}_{part_count}шт")
-                case "Труба [Круг]":
+                case "Труба Круг":
                     tube_type = IGSGenerator.TubeType.Circle
                     filepath = part_name + (
                             (f" {circle_diameter:.10f}".rstrip('0').rstrip('.')) +
                             (f"x{part_thickness:.10f}".rstrip('0').rstrip('.')) +
                             (f"_{tube_length:.10f}".rstrip('0').rstrip('.')) +
                             f"_{part_material}_{part_count}шт").replace(",", ".")
-                case "Труба [Прямоугольник]":
+                case "Труба Профильная":
                     tube_type = IGSGenerator.TubeType.Rectangle
                     filepath = part_name + (
                             (f" {rect_width:.10f}".rstrip('0').rstrip('.')) +
