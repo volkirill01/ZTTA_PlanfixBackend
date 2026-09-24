@@ -2332,6 +2332,7 @@ async def create_typical_parts(request: web.Request):
                 print_error("Part name must not be empty")
                 return web.json_response({"code": 1, "message": "Название детали не может быть пустым", "dxf_files": [], "pdf_files": []})
 
+            tube_type_name = ""
             filepath = part_name
             match analitic["analitic"]["name"]:
                 case "Типовая деталь Прямоугольник":
@@ -2371,14 +2372,16 @@ async def create_typical_parts(request: web.Request):
                             f"_{part_material}_{part_count}шт")
                 case "Труба Круг":
                     tube_type = IGSGenerator.TubeType.Circle
-                    filepath = part_name + (
+                    tube_type_name = "Труба круглая"
+                    filepath = part_name + " " + tube_type_name + (
                             (f" {circle_diameter:.10f}".rstrip('0').rstrip('.')) +
                             (f"x{part_thickness:.10f}".rstrip('0').rstrip('.')) +
                             (f"_{tube_length:.10f}".rstrip('0').rstrip('.')) +
                             f"_{part_material}_{part_count}шт").replace(",", ".")
                 case "Труба Профильная":
                     tube_type = IGSGenerator.TubeType.Rectangle
-                    filepath = part_name + (
+                    tube_type_name = "Труба профильная"
+                    filepath = part_name + " " + tube_type_name + (
                             (f" {rect_width:.10f}".rstrip('0').rstrip('.')) +
                             (f"x{rect_height:.10f}".rstrip('0').rstrip('.')) +
                             (f"x{part_thickness:.10f}".rstrip('0').rstrip('.')) +
@@ -2460,14 +2463,8 @@ async def create_typical_parts(request: web.Request):
                 output_pdf_parts.append(response.json()["id"])
             else:
                 igs_generator.reset(filepath)
-                tube_type_name = ""
-                match tube_type:
-                    case IGSGenerator.TubeType.Circle:
-                        tube_type_name = "Труба круглая"
-                    case IGSGenerator.TubeType.Rectangle:
-                        tube_type_name = "Труба профильная"
 
-                dxf_generator.reset(part_thickness, part_count, f"{tube_type_name} | {part_name}", f"{tube_type_name} {filepath}", author, number, part_material, technical_path)
+                dxf_generator.reset(part_thickness, part_count, f"{tube_type_name} | {part_name}", filepath, author, number, part_material, technical_path)
 
                 match tube_type:
                     case IGSGenerator.TubeType.Circle:
